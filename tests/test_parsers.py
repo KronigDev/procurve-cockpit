@@ -912,9 +912,62 @@ def _t_resources():
     assert mem == {"total": "118464512", "free": "86970368"}, mem
 
 
+#: Verbatim from an HP 2910al-24G on W.15.14.0018.
+SHOW_SYSTEM_W15 = """
+ Status and Counters - General System Information
+
+  System Name        : HP-2910al-24G
+  System Contact     : BR Rennen
+  System Location    : BKR Rack - Testumgebung
+
+  MAC Age Time (sec) : 300
+
+  Time Zone          : 0
+  Daylight Time Rule : None
+
+  Software revision  : W.15.14.0018         Base MAC Addr      : 0026f1-427f80
+  ROM Version        : W.14.06              Serial Number      : SG024IP0LM
+
+  Up Time            : 5 days               Memory   - Total   : 100,663,296
+  CPU Util (%)       : 0                               Free    : 68,814,132
+
+  IP Mgmt  - Pkts Rx : 28,146               Packet   - Total   : 6750
+             Pkts Tx : 26,289               Buffers    Free    : 5093
+                                                       Lowest  : 5054
+                                                       Missed  : 0
+"""
+
+SHOW_CPU_W15 = """
+0 percent busy, from 300 sec ago
+1 sec ave: 1 percent busy
+5 sec ave: 1 percent busy
+1 min ave: 1 percent busy
+"""
+
+
+@check("show system on a real 2910al (W.15.14.0018)")
+def _t_show_system_w15():
+    info = P.parse_system_info(SHOW_SYSTEM_W15)
+    assert info["name"] == "HP-2910al-24G", info
+    assert info["serial"] == "SG024IP0LM", info
+    assert info["software"] == "W.15.14.0018", info
+    assert info["cpu"] == "0", info
+    assert info["mem_total"] == "100,663,296", info
+    assert info["mem_free"] == "68,814,132", info
+    assert info["uptime"].startswith("5 days"), info
+
+
+@check("show cpu prefers the short averages over the since-boot line")
+def _t_cpu_w15():
+    # The leading "0 percent busy, from 300 sec ago" is not the current load.
+    assert P.parse_cpu(SHOW_CPU_W15) == "1", P.parse_cpu(SHOW_CPU_W15)
+
+
 @check("show uptime in both formats")
 def _t_uptime():
     assert P.parse_uptime("  4:07:33:16  ") == 4 * 86400 + 7 * 3600 + 33 * 60 + 16
+    # Verbatim W.15 output: dddd:hh:mm:ss with fractional seconds.
+    assert P.parse_uptime("0005:04:01:18.68") == 5 * 86400 + 4 * 3600 + 60 + 18
     assert P.parse_uptime(" 44 days, 2 hours, 51 minutes ") == 44 * 86400 + 2 * 3600 + 51 * 60
     assert P.parse_uptime("no uptime here") is None
 

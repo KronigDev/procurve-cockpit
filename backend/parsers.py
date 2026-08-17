@@ -790,10 +790,20 @@ def parse_structured(text: str) -> dict[str, Any]:
 _CPU_RE = re.compile(r"(\d+)\s*(?:percent|%)", re.I)
 #: Label style: "CPU Util (%) : 25" / "Total CPU Utilization (%) : 6".
 _CPU_LABEL_RE = re.compile(r"(?:cpu|utili[sz]ation)[^:\n]*:\s*(\d+)", re.I)
+#: W.15 prints several averages; the leading "N percent busy, from 300 sec
+#: ago" line reads 0 on any idle box, so prefer the short averages.
+_CPU_PREFERRED = (
+    re.compile(r"1\s*min\s*ave\S*\s*:?\s*(\d+)\s*percent", re.I),
+    re.compile(r"5\s*sec\s*ave\S*\s*:?\s*(\d+)\s*percent", re.I),
+)
 
 
 def parse_cpu(text: str) -> str:
     """``show cpu`` -> utilisation as a bare number string ("4")."""
+    for pattern in _CPU_PREFERRED:
+        m = pattern.search(text)
+        if m:
+            return m.group(1)
     m = _CPU_RE.search(text) or _CPU_LABEL_RE.search(text)
     return m.group(1) if m else ""
 

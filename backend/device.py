@@ -214,12 +214,14 @@ class ProCurveDevice:
             fetch.error = f"Parser failed ({exc}). Raw output is still available."
         return fetch
 
-    #: Spellings of the general status page. K/W.15 answers the first; other
-    #: trains only accept the shorter forms.
+    #: Spellings of the general status page. `show system` is the canonical
+    #: form everywhere ("default is information" per the CLI help) -- W.15
+    #: rejects the hyphenated spelling outright, so that is only a fallback
+    #: for the old trains that never learned the short form.
     SYSTEM_INFO_COMMANDS = (
+        "show system",
         "show system-information",
         "show system information",
-        "show system",
     )
 
     def _system_info(self, *, cache: float) -> Fetch:
