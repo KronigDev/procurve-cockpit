@@ -9,7 +9,7 @@ const history = [];
 let transcript = '';
 
 const QUICK = [
-  'show version', 'show system-information', 'show interfaces brief',
+  'show version', 'show system', 'show interfaces brief',
   'show vlans', 'show trunks', 'show spanning-tree', 'show lldp info remote-device',
   'show mac-address', 'show arp', 'show ip', 'show running-config', 'show logging -r',
   'show tech', 'show flash', 'show modules',
@@ -50,6 +50,11 @@ export default {
     }
     quickBar.appendChild(h('span.spacer'));
     quickBar.appendChild(h('button.btn.btn-sm', {
+      text: '✕ Ctrl+C',
+      title: 'Abort the current dialogue or running command',
+      onclick: () => sendInterrupt(),
+    }));
+    quickBar.appendChild(h('button.btn.btn-sm', {
       text: 'Save transcript',
       onclick: () => downloadText('cli-transcript.txt', transcript),
     }));
@@ -72,6 +77,7 @@ export default {
     ws.addEventListener('open', () => { ready = true; write('* connected', 'c-sys'); });
     ws.addEventListener('close', () => { ready = false; write('* console connection closed', 'c-sys'); });
     ws.addEventListener('error', () => write('* console socket error', 'c-err'));
+    let atPrompt = true;
     ws.addEventListener('message', (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg.type === 'prompt') {
@@ -81,7 +87,18 @@ export default {
       } else if (msg.type === 'output') {
         if (msg.output) write(msg.output);
         if (msg.error) write(msg.error, 'c-err');
-        if (msg.prompt) promptLabel.textContent = msg.prompt;
+        if (msg.at_prompt === false) {
+          // The switch is sitting at a question -- the next line answers it.
+          if (atPrompt) {
+            write('* the switch is waiting for input — type the answer '
+              + '(empty line = Enter, Ctrl+C aborts)', 'c-sys');
+          }
+          atPrompt = false;
+          promptLabel.textContent = '…';
+        } else {
+          atPrompt = true;
+          if (msg.prompt) promptLabel.textContent = msg.prompt;
+        }
         line.disabled = false;
         line.focus();
       } else if (msg.type === 'error') {
@@ -91,20 +108,34 @@ export default {
     });
 
     const send = () => {
-      const command = line.value.trim();
-      if (!command) return;
+      const command = line.value.replace(/\s+$/, '');
+      // At the prompt an empty line is a no-op; inside a dialogue it is a
+      // real answer (accept the default / just press Enter).
+      if (!command.trim() && atPrompt) return;
       if (!ready) { toast('Console not connected.', 'err'); return; }
-      history.push(command);
-      historyIndex = history.length;
+      if (command.trim()) {
+        history.push(command);
+        historyIndex = history.length;
+      }
       line.value = '';
       line.disabled = true;
       ws.send(JSON.stringify({ command }));
     };
 
+    const sendInterrupt = () => {
+      if (!ready) { toast('Console not connected.', 'err'); return; }
+      write('^C', 'c-cmd');
+      line.disabled = true;
+      ws.send(JSON.stringify({ interrupt: true }));
+    };
+
     let historyIndex = history.length;
     line.addEventListener('keydown', (ev) => {
       if (ev.key === 'Enter') { ev.preventDefault(); send(); }
-      else if (ev.key === 'ArrowUp') {
+      else if (ev.ctrlKey && ev.key === 'c' && !line.value) {
+        ev.preventDefault();
+        sendInterrupt();
+      } else if (ev.key === 'ArrowUp') {
         ev.preventDefault();
         if (historyIndex > 0) { historyIndex -= 1; line.value = history[historyIndex]; }
       } else if (ev.key === 'ArrowDown') {
@@ -117,7 +148,9 @@ export default {
     setTimeout(() => line.focus(), 50);
 
     write('ProCurve Cockpit — CLI. Use the panels for configuration changes so the preview '
-        + 'applies. Commands typed here run immediately.', 'c-sys');
+        + 'applies. Commands typed here run immediately. Interactive dialogues work: when '
+        + 'the switch asks something (snmpv3 enable, reload questions), type the answer — '
+        + 'Ctrl+C aborts.', 'c-sys');
 
     // Tear the socket down when the panel is replaced.
     return () => { try { ws.close(); } catch { /* already gone */ } };

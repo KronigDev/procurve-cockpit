@@ -1152,6 +1152,26 @@ def _t_console_reload_no_save():
     assert chan.sent == ["reload\n", "y\n", "n\n"], chan.sent
 
 
+@check("interactive console: a pausing question is not mistaken for the prompt")
+def _t_interactive():
+    chan = FakeChannel([
+        # Free-text question, no CLI prompt at the end -> the shell must pause.
+        "snmpv3 enable\nSNMPv3 Initial Configuration\n  Please enter the initial username: ",
+        "initial\n  Authentication protocol password: ",
+        "s3cret\nUser 'initial' created\nSW-CORE# ",
+    ])
+    shell = ProCurveShell(chan)
+    out, at_prompt = shell.run_interactive("snmpv3 enable", timeout=5)
+    assert at_prompt is False, (out, at_prompt)
+    assert "initial username" in out, out
+    out, at_prompt = shell.run_interactive("initial", timeout=5)
+    assert at_prompt is False, (out, at_prompt)
+    out, at_prompt = shell.run_interactive("s3cret", timeout=5)
+    assert at_prompt is True, (out, at_prompt)
+    assert "created" in out, out
+    assert chan.sent == ["snmpv3 enable\n", "initial\n", "s3cret\n"], chan.sent
+
+
 @check("reboot dialogue: a returning prompt means the switch did NOT reboot")
 def _t_reboot_rejected():
     chan = FakeChannel([

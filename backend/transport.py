@@ -751,6 +751,32 @@ class ProCurveShell:
             lines.pop()
         return "\n".join(lines).strip("\n")
 
+    def run_interactive(self, text: str, timeout: float = 45.0) -> tuple[str, bool]:
+        """One console exchange: send *text* verbatim, read until the CLI
+        prompt returns or the switch pauses waiting for more input.
+
+        Returns ``(output, at_prompt)``.  ``at_prompt`` False means the switch
+        sits at an interactive question (``snmpv3 enable`` asking for the
+        initial user, an unanswered [y/n], a sub-menu) -- the next call's
+        *text* is the answer.  Nothing is auto-answered here: this is the one
+        path where the human drives the dialogue.
+        """
+        with self.lock:
+            self.chan.send_bytes(text.encode() + b"\n")
+            collected, reason = self._read_until(timeout, idle_stop=1.2)
+            self.last_raw = collected
+            self._update_state(collected)
+            body = self._strip_echo_and_prompt(collected, text)
+            return body, reason == "prompt"
+
+    def send_interrupt(self) -> tuple[str, bool]:
+        """Ctrl+C -- abort whatever dialogue or run the switch is in."""
+        with self.lock:
+            self.chan.send_bytes(b"\x03")
+            collected, reason = self._read_until(8.0, idle_stop=1.0)
+            self._update_state(collected)
+            return collected.strip(), reason == "prompt"
+
     def run_config(self, lines: Sequence[str], timeout: float = 30.0) -> list[CommandResult]:
         """Enter config mode, push *lines*, come back out.
 

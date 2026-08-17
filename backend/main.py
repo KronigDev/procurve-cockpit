@@ -369,6 +369,10 @@ async def cli(ws: WebSocket) -> None:
     device = session.device
     await ws.send_json({"type": "prompt", "prompt": device.shell.state.prompt})
 
+    # The console is genuinely interactive: when the switch pauses at a
+    # question (`snmpv3 enable`, an unanswered [y/n]), at_prompt goes False
+    # and the next line typed is the answer. Nothing is auto-answered here.
+    at_prompt = True
     try:
         while True:
             message = await ws.receive_text()
@@ -376,26 +380,34 @@ async def cli(ws: WebSocket) -> None:
                 payload = json.loads(message)
             except json.JSONDecodeError:
                 payload = {"command": message}
-            command = (payload.get("command") or "").rstrip("\n")
-            if not command.strip():
-                await ws.send_json({"type": "prompt", "prompt": device.shell.state.prompt})
-                continue
-            await ws.send_json({"type": "echo", "command": command})
             try:
-                result = await asyncio.to_thread(
-                    device.run_raw, command, float(payload.get("timeout", 60))
-                )
+                if payload.get("interrupt"):
+                    result = await asyncio.to_thread(device.console_interrupt)
+                    command = "^C"
+                else:
+                    command = (payload.get("command") or "").rstrip("\n")
+                    if not command.strip() and at_prompt:
+                        await ws.send_json(
+                            {"type": "prompt", "prompt": device.shell.state.prompt}
+                        )
+                        continue
+                    await ws.send_json({"type": "echo", "command": command})
+                    result = await asyncio.to_thread(
+                        device.console_exchange, command, float(payload.get("timeout", 45))
+                    )
             except TransportError as exc:
                 await ws.send_json({"type": "error", "message": str(exc)})
                 break
-            session.note("cli", {"command": command, "ok": result["ok"]})
+            at_prompt = result["at_prompt"]
+            session.note("cli", {"command": command, "ok": True})
             await ws.send_json(
                 {
                     "type": "output",
                     "command": command,
                     "output": result["output"],
-                    "error": result["error"],
-                    "prompt": device.shell.state.prompt,
+                    "error": None,
+                    "prompt": result["prompt"],
+                    "at_prompt": at_prompt,
                 }
             )
     except WebSocketDisconnect:

@@ -7,6 +7,17 @@ the versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added (interactive console)
+
+- **The web CLI is now genuinely interactive.** When the switch pauses at
+  a question — `snmpv3 enable` asking for the initial user, a reload
+  prompt, a sub-menu — the console shows the question, marks the input
+  line with `…`, and the next line typed is the answer (an empty line is
+  a plain Enter). Nothing is auto-answered on this path, and **Ctrl+C**
+  (button or keyboard) aborts the dialogue. This closes the last feature
+  class the panels could not model: interactive setup flows now run
+  entirely in the browser.
+
 ### Added (closing the last gaps)
 
 - **`show tech` is viewed in the app** — searchable line filter over the

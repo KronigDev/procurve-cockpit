@@ -712,6 +712,17 @@ class ProCurveDevice:
         self._cache.clear()
         return self._as_dict(result)
 
+    def console_exchange(self, text: str, timeout: float = 45.0) -> dict[str, Any]:
+        """One truly interactive console step (the web CLI's transport)."""
+        output, at_prompt = self.shell.run_interactive(text, timeout=timeout)
+        self._cache.clear()
+        return {"output": output, "at_prompt": at_prompt, "prompt": self.shell.state.prompt}
+
+    def console_interrupt(self) -> dict[str, Any]:
+        output, at_prompt = self.shell.send_interrupt()
+        self._cache.clear()
+        return {"output": output, "at_prompt": at_prompt, "prompt": self.shell.state.prompt}
+
     def write_memory(self) -> dict[str, Any]:
         return self._as_dict(self.shell.run("write memory", timeout=60))
 
