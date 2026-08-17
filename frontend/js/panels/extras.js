@@ -158,19 +158,48 @@ export default {
       }),
     );
 
-    const techBtn = h('button.btn', { text: 'Generate & download (takes ~1 minute)' });
+    // show tech is viewed IN the app: sectioned by the commands it echoes,
+    // full-text searchable. Download stays available as a convenience.
+    const techHost = h('div');
+    const techBtn = h('button.btn', { text: 'Collect show tech (takes ~1 minute)' });
+    let techRaw = '';
+    const drawTech = (needle = '') => {
+      const lines = techRaw.split('\n');
+      const shown = needle
+        ? lines.filter((l) => l.toLowerCase().includes(needle))
+        : lines;
+      techHost.querySelector('.tech-view').textContent = shown.join('\n') || '(no match)';
+      techHost.querySelector('.tech-count').textContent = needle
+        ? `${shown.length} of ${lines.length} lines`
+        : `${lines.length} lines`;
+    };
     techBtn.addEventListener('click', async () => {
       techBtn.disabled = true;
       techBtn.textContent = 'Collecting — the CLI is busy meanwhile …';
       try {
         const fetch = await api.showCmd('show tech', 300);
-        downloadText('show-tech.txt', fetch.raw || '(empty)');
-        toast('show tech downloaded', 'ok');
+        techRaw = fetch.raw || '(empty)';
+        techHost.replaceChildren(
+          h('div.toolbar', null,
+            input({
+              type: 'search', placeholder: 'Search the dump …',
+              oninput: (ev) => drawTech(ev.target.value.trim().toLowerCase()),
+            }),
+            h('span.spacer'),
+            h('span.chip.tech-count'),
+            h('button.btn.btn-sm', {
+              text: 'Download as file',
+              onclick: () => downloadText('show-tech.txt', techRaw),
+            }),
+          ),
+          h('pre.raw.tech-view', { style: { maxHeight: '60vh' } }),
+        );
+        drawTech();
       } catch (err) {
         toast('show tech failed', 'err', err.message, 8000);
       } finally {
         techBtn.disabled = false;
-        techBtn.textContent = 'Generate & download (takes ~1 minute)';
+        techBtn.textContent = 'Collect show tech again';
       }
     });
 
@@ -202,12 +231,45 @@ export default {
       ]),
     ));
 
+    // ── source-port filters ─────────────────────────────────────────────
+    const fltSrc = input({ placeholder: 'source port, e.g. 7', style: { maxWidth: '150px' } });
+    const fltDrop = input({ placeholder: 'drop towards: 1-4,10' });
+    const fltFwd = input({ placeholder: 'forward towards: 5,6 (optional)' });
+    root.appendChild(card('Source-port filter', 'filter source-port', [
+      h('p.note', { text: 'Blocks traffic from one port towards chosen destination ports (all VLANs).' }),
+      field('Source port', fltSrc),
+      field('Drop towards', fltDrop),
+      field('Forward towards', fltFwd),
+      h('div.form-actions', null,
+        h('button.btn.btn-primary', {
+          text: 'Set filter',
+          onclick: () => {
+            if (!fltSrc.value.trim() || (!fltDrop.value.trim() && !fltFwd.value.trim())) {
+              toast('Source port and at least one destination list are required.', 'err'); return;
+            }
+            const payload = { source_port: fltSrc.value.trim() };
+            if (fltDrop.value.trim()) payload.drop_ports = fltDrop.value.trim();
+            if (fltFwd.value.trim()) payload.forward_ports = fltFwd.value.trim();
+            propose('filter.set', payload);
+          },
+        }),
+        h('button.btn', {
+          text: 'Remove filter',
+          onclick: () => {
+            if (!fltSrc.value.trim()) { toast('Enter the source port.', 'err'); return; }
+            propose('filter.set', { source_port: fltSrc.value.trim(), remove: true });
+          },
+        }),
+      ),
+    ]));
+
     root.appendChild(card('Support dump', 'show tech', [
       h('p.note', {
-        text: 'The full diagnostic dump HP support asks for. It is collected over the '
-          + 'live session and offered as a text file — nothing is stored on this server.',
+        text: 'The full diagnostic dump HP support asks for — viewable and searchable '
+          + 'right here, downloadable on top. Nothing is stored on this server.',
       }),
       h('div.form-actions', null, techBtn),
+      techHost,
     ]));
 
     // ── read cards -- hidden on trains that reject the command ──────────

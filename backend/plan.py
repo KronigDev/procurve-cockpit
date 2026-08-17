@@ -251,6 +251,8 @@ def build_vlan_update(p: dict) -> Plan:
         cmds.append("jumbo" if p["jumbo"] else "no jumbo")
     if "voice" in p:
         cmds.append("voice" if p["voice"] else "no voice")
+    if p.get("ipv6") is not None:
+        cmds.append("ipv6 enable" if p["ipv6"] else "no ipv6 enable")
     if "helper_address" in p:
         cmds.append(
             f"ip helper-address {p['helper_address']}"
@@ -441,6 +443,21 @@ def build_system(p: dict) -> Plan:
         cmds.append("sntp unicast")
         for idx, server in enumerate(p["sntp_servers"], start=1):
             cmds.append(f"sntp server priority {idx} {server}")
+    if p.get("sntp_auth") is not None:
+        cmds.append("sntp authentication" if p["sntp_auth"] else "no sntp authentication")
+    if p.get("timep_mode"):
+        timep = p["timep_mode"]
+        if timep == "dhcp":
+            cmds.append("ip timep dhcp")
+        elif timep == "manual":
+            server = str(p.get("timep_server") or "").strip()
+            if not re.fullmatch(r"[\w.\-:]+", server, re.ASCII):
+                raise PlanError("TIMEP manual mode needs a server address.")
+            cmds.append(f"ip timep manual {server}")
+        elif timep == "disabled":
+            cmds.append("no ip timep")
+        else:
+            raise PlanError("TIMEP mode must be dhcp, manual or disabled.")
     if p.get("idle_timeout") is not None:
         cmds.append(f"console idle-timeout {int(p['idle_timeout'])}")
     if "banner" in p:
@@ -508,6 +525,7 @@ def build_access(p: dict) -> Plan:
         "ssh": ("ip ssh", "no ip ssh"),
         "telnet": ("telnet-server", "no telnet-server"),
         "web": ("web-management", "no web-management"),
+        "web_ssl": ("web-management ssl", "no web-management ssl"),
         "ssh_v2_only": ("ip ssh version 2", None),
     }
     for key, (on, off) in mapping.items():
@@ -675,6 +693,8 @@ _PROTOCOL_TOGGLES: dict[str, tuple[str, str, str | None]] = {
     "autorun": ("autorun", "no autorun",
                 "Autorun executes scripts from inserted USB media automatically."),
     "tcp-push-preserve": ("tcp-push-preserve", "no tcp-push-preserve", None),
+    "lldp": ("lldp run", "no lldp run",
+             "Without LLDP the neighbour views go dark for this switch."),
     "encrypt-credentials": ("encrypt-credentials", "no encrypt-credentials",
                             "Changes how credentials are stored in the config file."),
     "include-credentials": ("include-credentials", "no include-credentials",
@@ -843,6 +863,159 @@ def build_fault_finder(p: dict) -> Plan:
     plan.commands = [f"fault-finder {fault} sensitivity {sensitivity} action {action}"]
     if action == "warn-and-disable":
         plan.risks.append(Risk("warn", "Matching ports are shut down automatically."))
+    return plan
+
+
+def build_dhcp_snooping(p: dict) -> Plan:
+    plan = Plan(title="DHCP snooping")
+    cmds: list[str] = []
+    if p.get("enabled") is not None:
+        cmds.append("dhcp-snooping" if p["enabled"] else "no dhcp-snooping")
+        if p["enabled"]:
+            plan.risks.append(Risk(
+                "warn",
+                "Without trusted uplink ports every DHCP OFFER is dropped -- "
+                "mark the port towards your DHCP server as trusted.",
+            ))
+    for vid in p.get("vlans_add") or []:
+        cmds.append(f"dhcp-snooping vlan {vlan_id(vid)}")
+    for vid in p.get("vlans_remove") or []:
+        cmds.append(f"no dhcp-snooping vlan {vlan_id(vid)}")
+    if p.get("trust_ports"):
+        cmds.append(f"dhcp-snooping trust {port_list(p['trust_ports'])}")
+    if p.get("untrust_ports"):
+        cmds.append(f"no dhcp-snooping trust {port_list(p['untrust_ports'])}")
+    if not cmds:
+        raise PlanError("Nothing to change.")
+    plan.commands = cmds
+    return plan
+
+
+def build_arp_protect(p: dict) -> Plan:
+    plan = Plan(title="Dynamic ARP protection")
+    cmds: list[str] = []
+    if p.get("enabled") is not None:
+        cmds.append("arp-protect" if p["enabled"] else "no arp-protect")
+    for vid in p.get("vlans_add") or []:
+        cmds.append(f"arp-protect vlan {vlan_id(vid)}")
+    for vid in p.get("vlans_remove") or []:
+        cmds.append(f"no arp-protect vlan {vlan_id(vid)}")
+    if p.get("trust_ports"):
+        cmds.append(f"arp-protect trust {port_list(p['trust_ports'])}")
+    if p.get("untrust_ports"):
+        cmds.append(f"no arp-protect trust {port_list(p['untrust_ports'])}")
+    if not cmds:
+        raise PlanError("Nothing to change.")
+    if p.get("enabled"):
+        plan.risks.append(Risk(
+            "warn",
+            "ARP protection relies on DHCP-snooping bindings; static-IP hosts "
+            "need trusted ports or they lose connectivity.",
+        ))
+    plan.commands = cmds
+    return plan
+
+
+def build_dot1x(p: dict) -> Plan:
+    """802.1X authenticator: per-port enable plus the global activation."""
+    plan = Plan(title="802.1X port access")
+    cmds: list[str] = []
+    if p.get("ports"):
+        if p.get("enabled") is None:
+            raise PlanError("Say whether the authenticator goes on or off for those ports.")
+        sel = port_list(p["ports"])
+        cmds.append(
+            f"aaa port-access authenticator {sel}"
+            if p["enabled"] else f"no aaa port-access authenticator {sel}"
+        )
+    if p.get("active") is not None:
+        cmds.append(
+            "aaa port-access authenticator active"
+            if p["active"] else "no aaa port-access authenticator active"
+        )
+        if p["active"]:
+            plan.risks.append(Risk(
+                "danger",
+                "Once active, authenticator ports pass NO traffic until a client "
+                "authenticates via RADIUS. Do not enable it on your uplink.",
+            ))
+    if not cmds:
+        raise PlanError("Nothing to change.")
+    plan.commands = cmds
+    return plan
+
+
+def build_aaa_server(p: dict) -> Plan:
+    proto = p.get("protocol")
+    if proto not in ("radius", "tacacs"):
+        raise PlanError("Protocol must be radius or tacacs.")
+    host = str(p.get("host") or "").strip()
+    if not re.fullmatch(r"[\w.\-:]+", host, re.ASCII):
+        raise PlanError("Server must be an address without spaces.")
+    prefix = "radius-server" if proto == "radius" else "tacacs-server"
+    if p.get("remove"):
+        plan = Plan(title=f"Remove {proto.upper()} server {host}")
+        plan.commands = [f"no {prefix} host {host}"]
+        return plan
+    plan = Plan(title=f"Add {proto.upper()} server {host}")
+    line = f"{prefix} host {host}"
+    if p.get("key"):
+        line += f" key {quote(p['key'])}"
+    plan.commands = [line]
+    plan.notes.append("The shared secret travels over this session in clear text (CLI limitation).")
+    return plan
+
+
+_AAA_ACCESS = ("console", "telnet", "ssh", "web", "port-access")
+_AAA_METHODS = ("local", "radius", "tacacs", "none", "authorized")
+
+
+def build_aaa_login(p: dict) -> Plan:
+    """Login/enable method order -- the classic way to lock yourself out."""
+    access = p.get("access")
+    if access not in _AAA_ACCESS:
+        raise PlanError(f"Access must be one of {', '.join(_AAA_ACCESS)}.")
+    stage = p.get("stage")
+    if stage not in ("login", "enable"):
+        raise PlanError("Stage must be login or enable.")
+    primary = p.get("primary")
+    if primary not in _AAA_METHODS:
+        raise PlanError(f"Primary method must be one of {', '.join(_AAA_METHODS)}.")
+    command = f"aaa authentication {access} {stage} {primary}"
+    secondary = p.get("secondary")
+    if secondary:
+        if secondary not in _AAA_METHODS:
+            raise PlanError(f"Secondary method must be one of {', '.join(_AAA_METHODS)}.")
+        command += f" {secondary}"
+    plan = Plan(title=f"AAA: {access} {stage} -> {primary}{f'/{secondary}' if secondary else ''}")
+    plan.commands = [command]
+    plan.risks.append(Risk(
+        "danger",
+        "A wrong AAA order locks every login out. Keep this session open and "
+        "verify a SECOND login works before you save.",
+        command,
+    ))
+    return plan
+
+
+def build_filter(p: dict) -> Plan:
+    """Source-port filters: what traffic from one port may reach."""
+    source = str(p.get("source_port") or "").strip()
+    if not re.fullmatch(r"[A-Za-z]?\d+", source, re.ASCII):
+        raise PlanError("Filter needs a single source port (e.g. 7 or A1).")
+    if p.get("remove"):
+        plan = Plan(title=f"Remove filter on port {source}")
+        plan.commands = [f"no filter source-port {source}"]
+        return plan
+    plan = Plan(title=f"Source-port filter on {source}")
+    cmds: list[str] = []
+    if p.get("drop_ports"):
+        cmds.append(f"filter source-port {source} drop {port_list(p['drop_ports'])}")
+    if p.get("forward_ports"):
+        cmds.append(f"filter source-port {source} forward {port_list(p['forward_ports'])}")
+    if not cmds:
+        raise PlanError("Name the ports to drop to or forward to.")
+    plan.commands = cmds
     return plan
 
 
@@ -1091,6 +1264,12 @@ BUILDERS: dict[str, Callable[[dict], Plan]] = {
     "fault_finder.set": build_fault_finder,
     "console.set": build_console,
     "front_panel.set": build_front_panel,
+    "dhcp_snooping.set": build_dhcp_snooping,
+    "arp_protect.set": build_arp_protect,
+    "dot1x.set": build_dot1x,
+    "aaa.server": build_aaa_server,
+    "aaa.login": build_aaa_login,
+    "filter.set": build_filter,
     "firmware.boot": build_firmware_boot,
     "firmware.default_boot": build_firmware_default,
     "firmware.copy": build_firmware_copy,

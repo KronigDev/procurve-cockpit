@@ -7,6 +7,20 @@ the versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added (closing the last gaps)
+
+- **`show tech` is viewed in the app** — searchable line filter over the
+  full dump, with the file download as an extra, not the only option.
+- **Security write surface**: DHCP snooping and dynamic ARP protection
+  (global, per VLAN, trusted ports), 802.1X authenticator (per port and
+  the global activation, with its no-traffic-until-authenticated danger
+  gate), RADIUS/TACACS+ server add/remove with shared secret, and the
+  AAA login/enable method order — flagged as the lockout danger it is.
+- **Source-port filters** (drop/forward per destination port list),
+  **IPv6 enable per VLAN**, **LLDP global toggle**, **web UI SSL
+  toggle**, **TIMEP mode** (dhcp/manual/disabled), **SNTP
+  authentication toggle**, and the sFlow form now covers instances 1–3.
+
 ### Added (feature completeness round)
 
 - **No more “unchanged” placeholders.** Forms open on the value the switch

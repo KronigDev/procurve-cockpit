@@ -51,6 +51,17 @@ const access = {
         web.el,
         field('Console timeout', idleInput, '(0 = never)'),
         h('div.form-actions', null,
+          h('span', { text: 'Web UI via HTTPS (SSL):', style: { fontSize: '12.5px' } }),
+          h('button.btn.btn-sm', {
+            text: 'Enable',
+            onclick: () => propose('access.set', { web_ssl: true }),
+          }),
+          h('button.btn.btn-sm', {
+            text: 'Disable',
+            onclick: () => propose('access.set', { web_ssl: false }),
+          }),
+        ),
+        h('div.form-actions', null,
           h('button.btn.btn-primary', {
             text: 'Apply',
             onclick: () => {
@@ -70,6 +81,71 @@ const access = {
         credentialForm('manager', refresh),
         h('hr', { style: { border: 'none', borderTop: '1px solid var(--line-soft)', margin: '12px 0' } }),
         credentialForm('operator', refresh),
+      ]),
+    ));
+
+    // ── RADIUS / TACACS servers + AAA method order ─────────────────────
+    const srvProto = select([['radius', 'RADIUS'], ['tacacs', 'TACACS+']]);
+    const srvHost = input({ placeholder: '10.0.0.30' });
+    const srvKey = input({ type: 'password', placeholder: 'shared secret (optional)' });
+
+    const aaaAccess = select([
+      ['ssh', 'SSH'], ['telnet', 'Telnet'], ['console', 'Console'],
+      ['web', 'Web'], ['port-access', '802.1X port access'],
+    ]);
+    const aaaStage = select([['login', 'login'], ['enable', 'enable (manager)']]);
+    const aaaPrimary = select([['local', 'local'], ['radius', 'radius'], ['tacacs', 'tacacs']]);
+    const aaaSecondary = select([
+      ['', '— no secondary —'], ['local', 'local'], ['none', 'none'], ['authorized', 'authorized'],
+    ]);
+
+    root.appendChild(h('div.grid.cols-2', null,
+      card('Authentication servers', 'radius-server / tacacs-server', [
+        field('Protocol', srvProto),
+        field('Server', srvHost),
+        field('Shared secret', srvKey),
+        h('div.form-actions', null,
+          h('button.btn.btn-primary', {
+            text: 'Add server',
+            onclick: () => {
+              if (!srvHost.value.trim()) { toast('Enter the server address.', 'err'); return; }
+              const payload = { protocol: srvProto.value, host: srvHost.value.trim() };
+              if (srvKey.value) payload.key = srvKey.value;
+              propose('aaa.server', payload).then((ok) => { if (ok) srvKey.value = ''; });
+            },
+          }),
+          h('button.btn', {
+            text: 'Remove server',
+            onclick: () => {
+              if (!srvHost.value.trim()) { toast('Enter the server address.', 'err'); return; }
+              propose('aaa.server', {
+                protocol: srvProto.value, host: srvHost.value.trim(), remove: true,
+              });
+            },
+          }),
+        ),
+      ]),
+      card('Login method order (AAA)', 'aaa authentication', [
+        h('p.note', {
+          text: 'Which credential store each access way asks, in order. Danger zone: '
+            + 'a wrong order locks every login out — the preview warns accordingly.',
+        }),
+        field('Access', aaaAccess),
+        field('Stage', aaaStage),
+        field('Primary method', aaaPrimary),
+        field('Secondary method', aaaSecondary),
+        h('div.form-actions', null,
+          h('button.btn.btn-primary', {
+            text: 'Stage AAA change …',
+            onclick: () => {
+              const payload = {
+                access: aaaAccess.value, stage: aaaStage.value, primary: aaaPrimary.value,
+              };
+              if (aaaSecondary.value) payload.secondary = aaaSecondary.value;
+              propose('aaa.login', payload);
+            },
+          }),
+        ),
       ]),
     ));
 
@@ -288,6 +364,110 @@ const portSecurity = {
         ),
       ),
     ]));
+
+    // ── 802.1X / DHCP snooping / ARP protect (write) ───────────────────
+    const dot1xPicker = h('select', { multiple: true, size: 8, style: { height: 'auto' } });
+    const snoopTrust = h('select', { multiple: true, size: 8, style: { height: 'auto' } });
+    for (const port of ports) {
+      const label = `${port.port}${port.name ? ` — ${port.name}` : ''}`;
+      dot1xPicker.appendChild(h('option', { value: port.port, text: label }));
+      snoopTrust.appendChild(h('option', { value: port.port, text: label }));
+    }
+    const chosenOf = (picker) => [...picker.selectedOptions].map((o) => o.value);
+
+    const guardForm = (intent, title, note) => {
+      const vlanInput = input({ type: 'number', min: 1, max: 4094, placeholder: 'VLAN id' });
+      return card(title, null, [
+      h('p.note', { text: note }),
+      field('VLAN', vlanInput),
+      h('div.form-actions', null,
+        h('button.btn.btn-sm', {
+          text: 'Enable globally',
+          onclick: () => propose(intent, { enabled: true }),
+        }),
+        h('button.btn.btn-sm', {
+          text: 'Disable globally',
+          onclick: () => propose(intent, { enabled: false }),
+        }),
+        h('button.btn.btn-sm', {
+          text: 'Add VLAN',
+          onclick: () => {
+            if (!vlanInput.value) { toast('Enter a VLAN id.', 'err'); return; }
+            propose(intent, { vlans_add: [Number(vlanInput.value)] });
+          },
+        }),
+        h('button.btn.btn-sm', {
+          text: 'Remove VLAN',
+          onclick: () => {
+            if (!vlanInput.value) { toast('Enter a VLAN id.', 'err'); return; }
+            propose(intent, { vlans_remove: [Number(vlanInput.value)] });
+          },
+        }),
+      ),
+      h('div.form-actions', null,
+        h('button.btn.btn-sm', {
+          text: 'Trust selected ports',
+          onclick: () => {
+            const sel = chosenOf(snoopTrust);
+            if (!sel.length) { toast('Select ports in the list.', 'err'); return; }
+            propose(intent, { trust_ports: sel });
+          },
+        }),
+        h('button.btn.btn-sm', {
+          text: 'Untrust selected ports',
+          onclick: () => {
+            const sel = chosenOf(snoopTrust);
+            if (!sel.length) { toast('Select ports in the list.', 'err'); return; }
+            propose(intent, { untrust_ports: sel });
+          },
+        }),
+      ),
+      ]);
+    };
+
+    root.appendChild(h('div.grid.cols-2', null,
+      card('802.1X authenticator', 'aaa port-access', [
+        h('p.note', { text: 'Needs a working RADIUS server (Access & accounts panel). Never enable it on your uplink.' }),
+        field('Ports', dot1xPicker),
+        h('div.form-actions', null,
+          h('button.btn.btn-sm', {
+            text: 'Enable on ports',
+            onclick: () => {
+              const sel = chosenOf(dot1xPicker);
+              if (!sel.length) { toast('No ports selected.', 'err'); return; }
+              propose('dot1x.set', { ports: sel, enabled: true });
+            },
+          }),
+          h('button.btn.btn-sm', {
+            text: 'Disable on ports',
+            onclick: () => {
+              const sel = chosenOf(dot1xPicker);
+              if (!sel.length) { toast('No ports selected.', 'err'); return; }
+              propose('dot1x.set', { ports: sel, enabled: false });
+            },
+          }),
+          h('button.btn.btn-sm.btn-danger', {
+            text: 'Activate globally …',
+            onclick: () => propose('dot1x.set', { active: true }),
+          }),
+          h('button.btn.btn-sm', {
+            text: 'Deactivate globally',
+            onclick: () => propose('dot1x.set', { active: false }),
+          }),
+        ),
+      ]),
+      h('div', null,
+        h('p.note', { text: 'Shared port list for snooping/ARP trust:' }),
+        snoopTrust,
+      ),
+    ));
+
+    root.appendChild(h('div.grid.cols-2', null,
+      guardForm('dhcp_snooping.set', 'DHCP snooping',
+        'Drops rogue DHCP servers. Trust the port towards your real DHCP server first.'),
+      guardForm('arp_protect.set', 'Dynamic ARP protection',
+        'Drops spoofed ARP replies, based on the DHCP-snooping bindings.'),
+    ));
 
     root.appendChild(structCard('Current state', data.port_security));
     root.appendChild(structCard('802.1X port access', data['8021x']));

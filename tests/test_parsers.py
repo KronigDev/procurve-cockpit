@@ -927,6 +927,53 @@ def _t_plan_console_fp():
             raise AssertionError(f"accepted {bad}")
 
 
+@check("plan: security guard rails (snooping, ARP protect, 802.1X, AAA, filters)")
+def _t_plan_guards():
+    p = plan.build("dhcp_snooping.set", {"enabled": True, "vlans_add": [20], "trust_ports": ["1", "2"]})
+    assert p.commands == ["dhcp-snooping", "dhcp-snooping vlan 20", "dhcp-snooping trust 1-2"], p.commands
+
+    p = plan.build("arp_protect.set", {"vlans_remove": [30], "untrust_ports": ["5"]})
+    assert p.commands == ["no arp-protect vlan 30", "no arp-protect trust 5"], p.commands
+
+    p = plan.build("dot1x.set", {"active": True})
+    assert p.commands == ["aaa port-access authenticator active"], p.commands
+    assert any(r.level == "danger" for r in p.risks), p.risks
+
+    p = plan.build("aaa.server", {"protocol": "radius", "host": "10.0.0.30", "key": "s3cret"})
+    assert p.commands == ['radius-server host 10.0.0.30 key "s3cret"'], p.commands
+    p = plan.build("aaa.server", {"protocol": "tacacs", "host": "10.0.0.31", "remove": True})
+    assert p.commands == ["no tacacs-server host 10.0.0.31"], p.commands
+
+    p = plan.build("aaa.login", {"access": "ssh", "stage": "login", "primary": "radius", "secondary": "local"})
+    assert p.commands == ["aaa authentication ssh login radius local"], p.commands
+    assert any(r.level == "danger" for r in p.risks), p.risks
+
+    p = plan.build("filter.set", {"source_port": "7", "drop_ports": "1-4"})
+    assert p.commands == ["filter source-port 7 drop 1-4"], p.commands
+    p = plan.build("filter.set", {"source_port": "7", "remove": True})
+    assert p.commands == ["no filter source-port 7"], p.commands
+
+    p = plan.build("system.set", {"timep_mode": "manual", "timep_server": "10.0.0.5", "sntp_auth": False})
+    assert p.commands == ["no sntp authentication", "ip timep manual 10.0.0.5"], p.commands
+
+    p = plan.build("vlan.update", {"id": 10, "ipv6": True})
+    assert p.commands == ["vlan 10", "ipv6 enable", "exit"], p.commands
+
+    for intent, bad in (
+        ("aaa.login", {"access": "carrier-pigeon", "stage": "login", "primary": "local"}),
+        ("aaa.server", {"protocol": "radius", "host": "bad host"}),
+        ("dot1x.set", {"ports": ["1"]}),
+        ("filter.set", {"source_port": "7"}),
+        ("system.set", {"timep_mode": "manual"}),
+    ):
+        try:
+            plan.build(intent, bad)
+        except plan.PlanError:
+            pass
+        else:
+            raise AssertionError(f"accepted {intent} {bad}")
+
+
 @check("kv parser keeps 'Label [default] : value' lines")
 def _t_kv_defaults():
     kv = P.parse_kv(" STP Enabled [No] : Yes\n Force Version [MSTP-operation] : MSTP-operation\n")

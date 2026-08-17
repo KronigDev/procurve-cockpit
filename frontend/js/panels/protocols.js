@@ -50,12 +50,30 @@ export default {
 
     // ── global toggles ──────────────────────────────────────────────────
     root.appendChild(card('Global protocol toggles', null, [
+      toggleRow('LLDP', 'lldp'),
       toggleRow('GVRP (dynamic VLANs)', 'gvrp'),
       toggleRow('CDP', 'cdp'),
       toggleRow('DHCP relay', 'dhcp-relay'),
       toggleRow('Fastboot (skip self test)', 'fastboot'),
       toggleRow('TCP push preserve', 'tcp-push-preserve'),
       h('p.note', { text: 'Each toggle is staged like any other change — the current state is in the cards below.' }),
+    ]));
+
+    // ── IPv6 per VLAN ───────────────────────────────────────────────────
+    const v6VlanSel = select(vlans.map((v) => [String(v.id), `VLAN ${v.id} — ${v.name}`]));
+    root.appendChild(card('IPv6 per VLAN', 'ipv6 enable', [
+      h('p.note', { text: 'Link-local IPv6 management on the chosen VLAN interface.' }),
+      field('VLAN', v6VlanSel),
+      h('div.form-actions', null,
+        h('button.btn.btn-sm', {
+          text: 'Enable IPv6',
+          onclick: () => propose('vlan.update', { id: Number(v6VlanSel.value), ipv6: true }),
+        }),
+        h('button.btn.btn-sm', {
+          text: 'Disable IPv6',
+          onclick: () => propose('vlan.update', { id: Number(v6VlanSel.value), ipv6: false }),
+        }),
+      ),
     ]));
 
     // ── IGMP per VLAN ───────────────────────────────────────────────────
@@ -134,6 +152,7 @@ export default {
     ));
 
     // ── UDLD + sFlow + option 82 ────────────────────────────────────────
+    const sfInstance = select([['1', 'instance 1'], ['2', 'instance 2'], ['3', 'instance 3']]);
     const sfDest = input({ placeholder: '10.0.0.20' });
     const sfPort = input({ type: 'number', placeholder: '6343 (default)' });
     const sfSampleRate = input({ type: 'number', placeholder: 'e.g. 500 (1 in N)' });
@@ -166,7 +185,8 @@ export default {
           }),
         ),
       ]),
-      card('sFlow', 'sflow 1 …', [
+      card('sFlow', 'sflow …', [
+        field('Instance', sfInstance),
         field('Collector address', sfDest),
         field('Collector UDP port', sfPort),
         field('Ports', sfPorts, '(for sampling/polling)'),
@@ -176,7 +196,7 @@ export default {
           h('button.btn.btn-primary', {
             text: 'Configure sFlow',
             onclick: () => {
-              const payload = { instance: 1 };
+              const payload = { instance: Number(sfInstance.value) };
               if (sfDest.value.trim()) payload.destination = sfDest.value.trim();
               if (sfPort.value !== '') payload.udp_port = Number(sfPort.value);
               const portsRaw = sfPorts.value.trim();
@@ -193,7 +213,7 @@ export default {
           }),
           h('button.btn', {
             text: 'Remove collector',
-            onclick: () => propose('sflow.set', { instance: 1, remove: true }),
+            onclick: () => propose('sflow.set', { instance: Number(sfInstance.value), remove: true }),
           }),
         ),
         field('DHCP relay option 82', o82Sel),

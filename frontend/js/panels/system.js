@@ -76,6 +76,18 @@ const system = {
     const poll = tracked('SNTP poll interval',
       input({ type: 'number', min: 30, max: 720, placeholder: '30–720' }),
       curPoll, '(seconds)');
+    const curSntpAuth = (() => {
+      const v = normToken(kvGet(sntpKv, 'authentication'));
+      if (!v) return '';
+      return v.includes('enab') ? '1' : '0';
+    })();
+    const sntpAuth = tracked('SNTP authentication',
+      select([['1', 'enabled'], ['0', 'disabled']]), curSntpAuth);
+    const timepMode = tracked('TIMEP mode', select([
+      ['dhcp', 'DHCP (server from lease)'], ['manual', 'manual server'],
+      ['disabled', 'disabled'],
+    ]), '');
+    const timepServer = input({ placeholder: 'TIMEP server (manual mode)' });
     const sntpInput = input({ placeholder: '10.0.0.1, pool.ntp.org' });
 
     root.appendChild(h('div.grid.cols-2', null,
@@ -101,7 +113,9 @@ const system = {
       ]),
       card('Time', logs.time.command, [
         h('p.note', { text: `Switch clock: ${(logs.time.raw || '').trim() || 'unknown'}` }),
-        tz.el, dst.el, sync.el, sntpMode.el, poll.el,
+        tz.el, dst.el, sync.el, sntpMode.el, poll.el, sntpAuth.el,
+        timepMode.el,
+        field('TIMEP server', timepServer, '(only for manual mode)'),
         field('SNTP servers', sntpInput, '(comma separated — setting servers also enables SNTP unicast)'),
         h('div.form-actions', null,
           h('button.btn.btn-primary', {
@@ -113,6 +127,11 @@ const system = {
               if (sync.changed() && sync.control.value) payload.time_sync = sync.control.value;
               if (sntpMode.changed() && sntpMode.control.value) payload.sntp_mode = sntpMode.control.value;
               if (poll.changed() && poll.control.value !== '') payload.sntp_poll = Number(poll.control.value);
+              if (sntpAuth.changed() && sntpAuth.control.value) payload.sntp_auth = sntpAuth.control.value === '1';
+              if (timepMode.changed() && timepMode.control.value) {
+                payload.timep_mode = timepMode.control.value;
+                if (timepMode.control.value === 'manual') payload.timep_server = timepServer.value.trim();
+              }
               const servers = sntpInput.value.split(',').map((s) => s.trim()).filter(Boolean);
               if (servers.length) payload.sntp_servers = servers;
               if (!Object.keys(payload).length) { toast('Nothing changed.', 'info'); return; }
