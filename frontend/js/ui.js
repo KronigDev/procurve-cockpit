@@ -130,7 +130,7 @@ export function kv(pairs) {
   return list;
 }
 
-export function loading(text = 'Lade …') {
+export function loading(text = 'Loading …') {
   return h('div.loading', null, h('div.spinner'), h('span', { text }));
 }
 
@@ -143,9 +143,12 @@ export function empty(text) {
  * columns: [{key, label, num?, render?(row)}]
  */
 export function table(columns, rows, options = {}) {
-  if (!rows || !rows.length) return empty(options.emptyText || 'Keine Einträge.');
+  if (!rows || !rows.length) return empty(options.emptyText || 'No entries.');
   const thead = h('thead', null, h('tr', null,
-    columns.map((col) => h(`th${col.num ? '.num' : ''}`, { text: col.label })),
+    // A label may be a node (a select-all checkbox, an icon) as well as text.
+    columns.map((col) => col.label instanceof Node
+      ? h(`th${col.num ? '.num' : ''}`, null, col.label)
+      : h(`th${col.num ? '.num' : ''}`, { text: col.label })),
   ));
   const tbody = h('tbody');
   for (const row of rows) {
@@ -172,13 +175,30 @@ export function badge(text, kind = 'mute') {
  * Collapsible raw CLI output — the fallback whenever a parser is unsure.
  * `fetch` is the {command, raw, error} envelope the backend returns.
  */
+function rawBody(fetchObj) {
+  // When the reply is empty, fall back to the untrimmed transcript. A bare
+  // "(empty)" tells you nothing about *why* — the transcript shows whether the
+  // switch stayed silent, rejected the command, or answered something we then
+  // trimmed away by mistake.
+  if (fetchObj.raw) return h('pre.raw', { text: fetchObj.raw });
+  if (fetchObj.transcript) {
+    return h('div', null,
+      h('p.note', { text: 'Command returned nothing. Full transcript, echo and prompt included:' }),
+      h('pre.raw', { text: fetchObj.transcript }),
+    );
+  }
+  return h('pre.raw', { text: '(empty)' });
+}
+
 export function rawBlock(fetchObj, label = null) {
   if (!fetchObj) return null;
   const cmd = fetchObj.command || '';
   return h('details.raw-toggle', null,
-    h('summary', { text: label || `Rohausgabe: ${cmd}` }),
-    fetchObj.error ? h('div.risk.warn', null, h('b', { text: 'Hinweis:' }), h('span', { text: fetchObj.error })) : null,
-    h('pre.raw', { text: fetchObj.raw || '(leer)' }),
+    h('summary', { text: label || `Raw output: ${cmd}` }),
+    fetchObj.error
+      ? h('div.risk.warn', null, h('b', { text: 'Switch:' }), h('span', { text: fetchObj.error }))
+      : null,
+    rawBody(fetchObj),
   );
 }
 
@@ -189,7 +209,7 @@ export function rawCard(title, fetchObj) {
     fetchObj.error
       ? h('div.risk.warn', null, h('b', { text: 'Switch:' }), h('span', { text: fetchObj.error }))
       : null,
-    h('pre.raw', { text: fetchObj.raw || '(leer)' }),
+    rawBody(fetchObj),
   ]);
 }
 
@@ -219,7 +239,7 @@ export function checkbox(labelText, checked, props = {}) {
 
 /** Tri-state select for "leave alone / on / off" port settings. */
 export function triState(labelText, props = {}) {
-  return field(labelText, select([['', 'unverändert'], ['1', 'ein'], ['0', 'aus']], props));
+  return field(labelText, select([['', 'unchanged'], ['1', 'on'], ['0', 'off']], props));
 }
 
 export function segmented(options, current, onChange) {

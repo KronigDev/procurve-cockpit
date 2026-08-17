@@ -1,144 +1,144 @@
 # ProCurve Cockpit
 
-Eine moderne Weboberfläche für HP/Aruba **ProVision**-Switches — gebaut für den
-**HP 2910al-24G**, funktioniert genauso mit 2810, 2510, 3500yl, 5400zl und
-Verwandten.
+A modern web interface for HP/Aruba **ProVision** switches — built for the
+**HP 2910al-24G**, works just as well on the 2810, 2510, 3500yl, 5400zl and
+relatives.
 
-Statt des Java-Web-UIs von 2009 fährt das Cockpit hinten eine persistente
-SSH-Sitzung zur CLI. Damit ist **jedes** Feature des Switches erreichbar — die
-CLI ist auf ProVision die einzige vollständige Schnittstelle (SNMP kann nur
-Bruchteile schreiben, das alte Web-UI noch weniger).
+Instead of the Java web UI from 2009, the cockpit drives a persistent SSH
+session to the CLI. That makes **every** feature of the switch reachable — on
+ProVision the CLI is the only complete interface (SNMP can write only fragments,
+the old web UI even less).
 
 ```
-   Browser ──HTTP/WS──> FastAPI (lokal) ──SSH(Legacy-Krypto)──> 2910al
+   Browser ──HTTP/WS──> FastAPI (local) ──SSH(legacy crypto)──> 2910al
 ```
 
-Aktuelle Version: **1.0.0** — siehe [CHANGELOG.md](CHANGELOG.md).
+Current version: **1.1.0** — see [CHANGELOG.md](CHANGELOG.md).
 
-## Schnellstart
+## Quick start
 
 ```powershell
 .\start.ps1
 ```
 
-Beim ersten Start wird eine virtuelle Umgebung angelegt und die Abhängigkeiten
-installiert; danach öffnet sich <http://127.0.0.1:8710/>. Dort IP, Benutzer und
-Passwort eingeben — es wird nichts auf Platte geschrieben.
+The first run creates a virtual environment and installs the dependencies, then
+opens <http://127.0.0.1:8710/>. Enter IP, user and password there — nothing is
+written to disk.
 
-Alternativ per Doppelklick auf `start.bat`.
+Double-clicking `start.bat` works too.
 
-## Warum das überhaupt nötig ist
+## Why this is necessary at all
 
-Der 2910al spricht SSH von 2008: Key-Exchange `diffie-hellman-group14-sha1`,
-Hostkey `ssh-rsa`, Cipher `aes*-cbc`, MAC `hmac-sha1`. PuTTY bietet das noch an,
-moderne SSH-Bibliotheken nicht mehr.
+The 2910al speaks SSH from 2008: key exchange `diffie-hellman-group14-sha1`,
+host key `ssh-rsa`, cipher `aes*-cbc`, MAC `hmac-sha1`. PuTTY still offers those;
+modern SSH libraries do not.
 
-> **Wichtig:** Die Abhängigkeit ist bewusst auf `paramiko>=3.4,<4` gepinnt.
-> **Paramiko 4 und 5 haben SHA-1-Kex und `ssh-rsa` komplett entfernt** — damit
-> ist keine Verbindung zu einem ProVision-Switch mehr möglich. Ein
-> `pip install -U paramiko` macht das Cockpit kaputt. Das Backend prüft das
-> beim Start und beim Verbindungsaufbau und sagt es deutlich, statt einen
-> kryptischen Handshake-Fehler zu werfen.
+> **Important:** the dependency is deliberately pinned to `paramiko>=3.4,<4`.
+> **Paramiko 4 and 5 removed SHA-1 key exchange and `ssh-rsa` entirely** — which
+> makes a connection to a ProVision switch impossible. A `pip install -U
+> paramiko` breaks the cockpit. The backend checks this at startup and again when
+> connecting, and says so in plain words instead of throwing a cryptic handshake
+> error.
 
-Telnet ist als Fallback eingebaut, falls auf einem Switch `ip ssh` nie aktiviert
-wurde. Da Python 3.13 `telnetlib` entfernt hat, spricht `backend/transport.py`
-das Nötigste von RFC 854 selbst.
+Telnet is built in as a fallback for switches where `ip ssh` was never enabled.
+Since Python 3.13 removed `telnetlib`, `backend/transport.py` speaks the
+necessary parts of RFC 854 itself.
 
-## Bedienkonzept: Vorschau → Anwenden
+## How it works: preview → apply
 
-Kein Klick geht direkt an den Switch. Jede Aktion erzeugt zuerst **exakt die
-CLI-Zeilen**, die gesendet würden. Die werden angezeigt, zusammen mit einer
-Risikoanalyse, und erst nach Bestätigung ausgeführt.
+No click reaches the switch unreviewed. Every action first produces **the exact
+CLI lines** that would be sent. Those are shown, together with a risk analysis,
+and only executed after confirmation.
 
-Befehle, die dich aussperren können, verlangen zusätzlich, dass du `APPLY`
-tippst. Die Analyse kennt dabei dein Management-VLAN und die IP, über die du
-gerade verbunden bist — sie warnt also bei *deinem* VLAN, nicht bei jedem.
+Commands that can lock you out additionally require you to type `APPLY`. The
+analysis knows your management VLAN and the IP you are connected through, so it
+warns about *your* VLAN rather than every VLAN.
 
-Erkannt werden u. a.: `no ip ssh`, IP-Änderung am Management-VLAN, Entfernen von
-Ports aus dem Management-VLAN, `erase startup-config`, `reload`,
-`crypto key zeroize`, Abschalten von Spanning Tree.
+Recognised among others: `no ip ssh`, IP changes on the management VLAN,
+removing ports from the management VLAN, `erase startup-config`, `reload`,
+`crypto key zeroize`, disabling spanning tree.
 
-## Funktionsumfang
+## Features
 
-| Bereich | Was geht |
+| Area | What you get |
 |---|---|
-| **Übersicht** | Modell, Firmware, Seriennummer, Uptime, CPU, Speicher, Module, Log |
-| **Ports** | Frontblenden-Ansicht mit Mehrfachauswahl (Shift-Klick), Name, Enable/Disable, Speed/Duplex, Flow Control, MDI, Broadcast-Limit, LLDP-Modus, VLAN-Zuordnung, STP pro Port |
-| **VLANs** | Anlegen/Ändern/Löschen, IP (statisch/DHCP), Jumbo, Voice, DHCP-Relay, Primary-/Management-VLAN, **Klick-Matrix Port × VLAN** |
-| **Trunks** | LACP / statischer Trunk / FEC anlegen und auflösen, LACP-Status |
-| **Spanning Tree** | RSTP/MSTP/STP, Bridge-Priorität, MST-Region, pro Port: Kosten, Priorität, Admin-Edge, BPDU-Protection, Root-Guard |
-| **PoE** | Pro Port ein/aus (= Fernneustart eines Access Points), Priorität, Zuteilungsmethode, Leistungsgrenze, Live-Verbrauch |
-| **Nachbarn** | LLDP/CDP inkl. Detailausgabe |
-| **MAC & ARP** | Volltextsuche, MAC↔IP-Verknüpfung über die ARP-Tabelle |
-| **IP & Routing** | VLAN-Interfaces, Routing-Tabelle, statische Routen, Default-Gateway, IP-Routing an/aus, RIP-Status |
-| **Sicherheit** | SSH/Telnet/Web an/aus, Manager-/Operator-Passwörter, SNMP-Communities und Trap-Ziele, Port-Security, 802.1X/RADIUS/TACACS/DHCP-Snooping/ARP-Protect (lesend) |
-| **QoS** | Port-Priorität, DSCP-Mapping, Rate-Limits |
-| **ACLs** | CLI-Block-Editor mit Vorschau |
-| **Mirroring** | SPAN-Sessions einrichten und entfernen |
-| **System** | Hostname, Standort, Kontakt, Banner, Zeitzone, Sommerzeit, SNTP, Syslog |
-| **Konfiguration** | running vs. startup als Diff, Download als `.cfg`, Zeilen einspielen, `write memory`, `reload`, Werksreset |
-| **CLI-Konsole** | Vollwertige Kommandozeile auf derselben Sitzung — alles, was oben nicht modelliert ist |
+| **Overview** | Model, firmware, serial, uptime, CPU, memory, modules, log |
+| **Ports** | Front-panel view with multi-select (shift-click), name, enable/disable, speed/duplex, flow control, MDI, broadcast limit, LLDP mode, VLAN assignment, per-port STP. Every control opens on the value currently configured |
+| **VLANs** | Create/change/delete, IP (static/DHCP), jumbo, voice, DHCP relay, primary/management VLAN, **click matrix port × VLAN** |
+| **Trunks** | Create and dissolve LACP / static trunk / FEC, LACP status |
+| **Spanning tree** | RSTP/MSTP/STP, bridge priority, MST region, per port: cost, priority, admin edge, BPDU protection, root guard |
+| **PoE** | Per port on/off (= remote reboot of an access point), priority, allocation method, power limit, live draw |
+| **Neighbours** | LLDP/CDP including detail output |
+| **MAC & ARP** | Full-text search, MAC↔IP correlation through the ARP table |
+| **IP & routing** | VLAN interfaces, routing table, static routes, default gateway, IP routing on/off, RIP status |
+| **Security** | SSH/Telnet/web on/off, manager/operator passwords, SNMP communities and trap targets, port security, 802.1X/RADIUS/TACACS/DHCP snooping/ARP protect (read-only) |
+| **QoS** | Port priority, DSCP mapping, rate limits |
+| **ACLs** | CLI block editor with preview |
+| **Mirroring** | Set up and remove SPAN sessions |
+| **System** | Host name, location, contact, banner, time zone, daylight saving, SNTP, syslog |
+| **Configuration** | running vs startup as a diff, download as `.cfg`, push lines, `write memory`, `reload`, factory reset |
+| **CLI console** | A full command line on the same session — everything not modelled above |
 
-Die Frontblende lässt sich nach **Status, VLAN, Geschwindigkeit oder PoE**
-einfärben.
+The front panel can be coloured by **status, VLAN, speed or PoE**.
 
-## Wenn ein Panel komisch aussieht
+## When a panel looks wrong
 
-Die Parser wurden gegen die dokumentierten K/W.15.x-Ausgabeformate gebaut, nicht
-gegen deinen konkreten Switch. Falls eine Tabelle leer bleibt oder Spalten
-verrutschen:
+The parsers were written against the documented K/W.15.x output formats, not
+against your particular switch. If a table stays empty or columns slip:
 
-1. In jedem Panel gibt es unten **„Rohausgabe: `show …`“** — dort steht, was der
-   Switch tatsächlich geantwortet hat.
-2. Diese Ausgabe als neues Sample in `tests/test_parsers.py` eintragen und den
-   Parser anpassen. Die Tests laufen ohne Switch.
+1. Every panel has **“Raw output: `show …`”** at the bottom — that is what the
+   switch actually replied. If a command returns nothing at all, the block shows
+   the full transcript including echo and prompt, so you can tell silence apart
+   from a rejected command.
+2. Add that output as a new sample in `tests/test_parsers.py` and adjust the
+   parser. The tests run without a switch.
 
-Die Parser leiten Spaltengrenzen aus der Trennlinie (`---- + ----`) ab statt aus
-festen Offsets, decken also Formatunterschiede zwischen Firmware-Ständen von
-selbst ab.
+The parsers derive column boundaries from the separator line (`---- + ----`)
+rather than from fixed offsets, so they absorb format differences between
+firmware trains on their own.
 
 ## Tests
 
 ```powershell
-.\.venv\Scripts\python.exe tests\test_parsers.py   # Parser + Plan-Erzeugung + Risikoanalyse
-.\.venv\Scripts\python.exe tests\test_api.py       # HTTP-Schicht, ohne Switch
+.\.venv\Scripts\python.exe tests\test_parsers.py   # parsers + plan building + risk analysis
+.\.venv\Scripts\python.exe tests\test_api.py       # HTTP layer, no switch needed
 ```
 
-## Aufbau
+## Layout
 
 ```
 backend/
-  transport.py   SSH (Legacy-Krypto) + Telnet, Prompt-Erkennung, Paging, Fehlererkennung
-  parsers.py     Generischer ProCurve-Tabellenparser + Parser je Kommando
-  device.py      Kommandoschicht: show-Aufrufe, Caching, Fähigkeitserkennung
-  plan.py        UI-Absicht -> CLI-Zeilen + Lockout-Risikoanalyse (kein Switch-Zugriff)
-  main.py        FastAPI: REST + WebSocket-Konsole, Sitzungsverwaltung
+  transport.py   SSH (legacy crypto) + Telnet, prompt detection, paging, error detection
+  parsers.py     Generic ProCurve table parser + one parser per command
+  device.py      Command layer: show calls, caching, capability probing
+  plan.py        UI intent -> CLI lines + lockout risk analysis (never touches the switch)
+  main.py        FastAPI: REST + WebSocket console, session management
 frontend/
-  index.html     Login + App-Shell
+  index.html     Login + app shell
   app.css        Design
-  js/            ES-Module ohne Build-Step
-    panels/      ein Modul pro Bereich
+  js/            ES modules, no build step
+    panels/      one module per area
 tests/
 ```
 
 ## Branches
 
-- `main` — Standardbranch, soll immer lauffähig sein
-- `dev` — hier wird gearbeitet, danach nach `main` gemergt
+- `main` — default branch, should always run
+- `dev` — where work happens, merged into `main` afterwards
 
-Jede nennenswerte Änderung gehört in [CHANGELOG.md](CHANGELOG.md).
+Every notable change belongs in [CHANGELOG.md](CHANGELOG.md).
 
-## Grenzen, ehrlich
+## Limits, honestly
 
-- **Kein atomares `config replace`.** ProVision kann das über die CLI nicht;
-  eingespielte Zeilen werden in die laufende Konfiguration eingemischt.
-- **Eine CLI-Sitzung.** Der Switch erlaubt genau eine, also werden alle Anfragen
-  serialisiert. Bei parallelen Panels wartet eines kurz.
-- **Passwörter gehen im Klartext über die CLI** (`password manager plaintext …`)
-  — das ist eine Eigenheit des Switches, nicht dieser Oberfläche. Über SSH ist
-  die Übertragung verschlüsselt, im Switch-Log kann der Befehl aber auftauchen.
-- **`show tech` und `show logging`** brauchen auf diesen Geräten mehrere
-  Sekunden; das Log wird auf der Übersicht deshalb nachgeladen.
-- **Nicht ins Netz stellen.** Der Server hat keine eigene Authentifizierung; wer
-  ihn erreicht, erreicht die offene Switch-Sitzung. Deshalb bindet er auf
+- **No atomic `config replace`.** ProVision cannot do it over the CLI; pushed
+  lines are merged into the running configuration.
+- **One CLI session.** The switch allows exactly one, so all requests are
+  serialised. With several panels open, one of them waits briefly.
+- **Passwords travel over the CLI in clear text** (`password manager plaintext
+  …`) — that is a property of the switch, not of this interface. Over SSH the
+  transport is encrypted, but the command can show up in the switch log.
+- **`show tech` and `show logging`** take several seconds on these boxes; the log
+  on the overview page is therefore loaded afterwards.
+- **Do not put this on a network.** The server has no authentication of its own;
+  whoever reaches it reaches the open switch session. That is why it binds to
   127.0.0.1.

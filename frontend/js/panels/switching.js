@@ -10,7 +10,7 @@ const trunks = {
   id: 'trunks',
   title: 'Trunks / LACP',
   icon: '⇄',
-  group: 'Konfiguration',
+  group: 'Configuration',
 
   async render(root, ctx) {
     const [{ data }, { data: portData }] = await Promise.all([
@@ -30,19 +30,19 @@ const trunks = {
 
     root.appendChild(h('div.page-head', null,
       h('h2', { text: 'Trunks / Link Aggregation' }),
-      h('p', { text: `${groups.size} Trunk-Gruppe(n)` }),
+      h('p', { text: `${groups.size} trunk group(s)` }),
     ));
 
-    root.appendChild(card('Trunk-Gruppen', data.trunks.command, [
+    root.appendChild(card('Trunk groups', data.trunks.command, [
       table([
-        { key: 'group', label: 'Gruppe', render: (g) => badge(g.group, 'violet') },
-        { key: 'type', label: 'Typ' },
-        { key: 'ports', label: 'Mitglieder', mono: true, render: (g) => g.ports.join(', ') },
+        { key: 'group', label: 'Group', render: (g) => badge(g.group, 'violet') },
+        { key: 'type', label: 'Type' },
+        { key: 'ports', label: 'Members', mono: true, render: (g) => g.ports.join(', ') },
         {
           key: 'x',
           label: '',
           render: (g) => h('button.btn.btn-sm', {
-            text: 'Auflösen',
+            text: 'Dissolve',
             onclick: () => propose('trunk.delete', { ports: g.ports }).then((ok) => ok && refresh()),
           }),
         },
@@ -59,20 +59,20 @@ const trunks = {
       }));
     }
     const groupInput = input({ value: nextFreeGroup(groups), placeholder: 'trk1' });
-    const modeSel = select([['lacp', 'LACP (dynamisch, 802.3ad)'], ['trunk', 'Static Trunk'], ['fec', 'FEC (legacy)']]);
+    const modeSel = select([['lacp', 'LACP (dynamic, 802.3ad)'], ['trunk', 'static trunk'], ['fec', 'FEC (legacy)']]);
 
-    root.appendChild(card('Neuen Trunk anlegen', null, [
+    root.appendChild(card('Create a trunk', null, [
       h('div.grid.cols-2', null,
-        field('Mitgliedsports', portPicker, '(Strg/Shift für Mehrfachauswahl)'),
+        field('Member ports', portPicker, '(ctrl/shift for multiple)'),
         h('div', null,
-          field('Gruppenname', groupInput, '(trk1 … trk24)'),
-          field('Modus', modeSel),
+          field('Group name', groupInput, '(trk1 … trk24)'),
+          field('Mode', modeSel),
           h('div.form-actions', null,
             h('button.btn.btn-primary', {
-              text: 'Trunk anlegen',
+              text: 'Create trunk',
               onclick: () => {
                 const chosen = [...portPicker.selectedOptions].map((o) => o.value);
-                if (chosen.length < 2) { toast('Mindestens zwei Ports auswählen.', 'err'); return; }
+                if (chosen.length < 2) { toast('Select at least two ports.', 'err'); return; }
                 propose('trunk.create', {
                   ports: chosen, group: groupInput.value.trim().toLowerCase(), mode: modeSel.value,
                 }).then((ok) => ok && refresh());
@@ -83,7 +83,7 @@ const trunks = {
       ),
     ]));
 
-    root.appendChild(rawCard('LACP-Status', data.lacp));
+    root.appendChild(rawCard('LACP status', data.lacp));
   },
 };
 
@@ -91,7 +91,7 @@ const stp = {
   id: 'stp',
   title: 'Spanning Tree',
   icon: '⑂',
-  group: 'Konfiguration',
+  group: 'Configuration',
 
   async render(root, ctx) {
     const { data } = await api.data('stp');
@@ -100,25 +100,25 @@ const stp = {
 
     root.appendChild(h('div.page-head', null,
       h('h2', { text: 'Spanning Tree' }),
-      h('p', { text: info.enabled ? `aktiv · ${info.mode || ''}` : 'deaktiviert' }),
+      h('p', { text: info.enabled ? `enabled · ${info.mode || ''}` : 'disabled' }),
     ));
 
-    const enabledSel = select([['', 'unverändert'], ['1', 'aktiviert'], ['0', 'deaktiviert']]);
-    const modeSel = select([['', 'unverändert'], ['rstp', 'RSTP (802.1w)'], ['mstp', 'MSTP (802.1s)'], ['stp', 'STP (legacy)']]);
-    const prioInput = input({ type: 'number', min: 0, max: 15, placeholder: `aktuell: ${info.priority || '—'}` });
-    const mstName = input({ placeholder: 'MST-Region-Name' });
-    const mstRev = input({ type: 'number', placeholder: 'MST-Revision' });
+    const enabledSel = select([['', 'unchanged'], ['1', 'enabled'], ['0', 'disabled']]);
+    const modeSel = select([['', 'unchanged'], ['rstp', 'RSTP (802.1w)'], ['mstp', 'MSTP (802.1s)'], ['stp', 'STP (legacy)']]);
+    const prioInput = input({ type: 'number', min: 0, max: 15, placeholder: `current: ${info.priority || '—'}` });
+    const mstName = input({ placeholder: 'MST region name' });
+    const mstRev = input({ type: 'number', placeholder: 'MST revision' });
 
     root.appendChild(h('div.grid.cols-2', null,
-      card('Globale Einstellungen', null, [
+      card('Global settings', null, [
         field('Spanning Tree', enabledSel),
-        field('Modus', modeSel),
-        field('Bridge-Priorität', prioInput, '(0–15, wird ×4096 gerechnet)'),
-        field('MST-Region', mstName),
-        field('MST-Revision', mstRev),
+        field('Mode', modeSel),
+        field('Bridge priority', prioInput, '(0–15, multiplied by 4096)'),
+        field('MST region', mstName),
+        field('MST revision', mstRev),
         h('div.form-actions', null,
           h('button.btn.btn-primary', {
-            text: 'Übernehmen',
+            text: 'Apply',
             onclick: () => {
               const payload = {};
               if (enabledSel.value) payload.enabled = enabledSel.value === '1';
@@ -126,20 +126,20 @@ const stp = {
               if (prioInput.value !== '') payload.priority = Number(prioInput.value);
               if (mstName.value) payload.mst_name = mstName.value;
               if (mstRev.value !== '') payload.mst_revision = Number(mstRev.value);
-              if (!Object.keys(payload).length) { toast('Nichts geändert.', 'info'); return; }
+              if (!Object.keys(payload).length) { toast('Nothing changed.', 'info'); return; }
               propose('stp.global', payload).then((ok) => ok && refresh());
             },
           }),
         ),
       ]),
-      card('Root-Bridge', data.stp.command, [
+      card('Root bridge', data.stp.command, [
         kv([
-          ['Status', info.enabled ? 'aktiv' : 'inaktiv'],
-          ['Modus', info.mode],
-          ['Eigene Priorität', info.priority],
-          ['Root-MAC', info.root_mac],
-          ['Root-Pfadkosten', info.root_path_cost],
-          ['Root-Port', info.root_port],
+          ['Status', info.enabled ? 'enabled' : 'disabled'],
+          ['Mode', info.mode],
+          ['Own priority', info.priority],
+          ['Root MAC', info.root_mac],
+          ['Root path cost', info.root_path_cost],
+          ['Root port', info.root_port],
         ]),
       ]),
     ));
@@ -147,8 +147,8 @@ const stp = {
     root.appendChild(card('Ports', null, [
       table([
         { key: 'port', label: 'Port', mono: true },
-        { key: 'type', label: 'Typ' },
-        { key: 'cost', label: 'Kosten', num: true },
+        { key: 'type', label: 'Type' },
+        { key: 'cost', label: 'Cost', num: true },
         { key: 'priority', label: 'Prio', num: true },
         {
           key: 'state',
@@ -156,7 +156,7 @@ const stp = {
           render: (p) => badge(p.state || '—',
             /forward/i.test(p.state) ? 'ok' : /block|disab/i.test(p.state) ? 'danger' : 'mute'),
         },
-        { key: 'role', label: 'Rolle' },
+        { key: 'role', label: 'Role' },
         { key: 'designated_bridge', label: 'Designated Bridge', mono: true },
       ], info.ports || []),
       rawBlock(data.stp),
@@ -168,9 +168,9 @@ const stp = {
 
 const mirror = {
   id: 'mirror',
-  title: 'Port-Mirroring',
+  title: 'Port mirroring',
   icon: '⧉',
-  group: 'Diagnose',
+  group: 'Diagnostics',
 
   async render(root, ctx) {
     const { data: portData } = await api.data('ports');
@@ -178,13 +178,13 @@ const mirror = {
     const refresh = () => ctx.reload();
 
     root.appendChild(h('div.page-head', null,
-      h('h2', { text: 'Port-Mirroring' }),
-      h('p', { text: 'Verkehr auf einen Analyse-Port spiegeln (SPAN)' }),
+      h('h2', { text: 'Port mirroring' }),
+      h('p', { text: 'Mirror traffic to an analyser port (SPAN)' }),
     ));
 
     const sessionSel = select([['1', 'Session 1'], ['2', 'Session 2'], ['3', 'Session 3'], ['4', 'Session 4']]);
     const destSel = select(ports.map((p) => [p.port, `${p.port}${p.name ? ` — ${p.name}` : ''}`]));
-    const dirSel = select([['both', 'ein- und ausgehend'], ['in', 'nur eingehend'], ['out', 'nur ausgehend']]);
+    const dirSel = select([['both', 'in and out'], ['in', 'inbound only'], ['out', 'outbound only']]);
     const sourcePicker = h('select', { multiple: true, size: 10, style: { height: 'auto' } });
     for (const port of ports) {
       sourcePicker.appendChild(h('option', {
@@ -192,20 +192,20 @@ const mirror = {
       }));
     }
 
-    root.appendChild(card('Spiegelung einrichten', null, [
+    root.appendChild(card('Set up mirroring', null, [
       h('div.grid.cols-2', null,
-        field('Quellports (werden mitgeschnitten)', sourcePicker),
+        field('Source ports (mirrored)', sourcePicker),
         h('div', null,
           field('Session', sessionSel),
-          field('Zielport (Analyzer)', destSel),
-          field('Richtung', dirSel),
+          field('Destination port (analyser)', destSel),
+          field('Direction', dirSel),
           h('div.form-actions', null,
             h('button.btn.btn-primary', {
-              text: 'Spiegelung aktivieren',
+              text: 'Enable mirroring',
               onclick: () => {
                 const sources = [...sourcePicker.selectedOptions].map((o) => o.value);
-                if (!sources.length) { toast('Keine Quellports gewählt.', 'err'); return; }
-                if (sources.includes(destSel.value)) { toast('Zielport darf keine Quelle sein.', 'err'); return; }
+                if (!sources.length) { toast('No source ports selected.', 'err'); return; }
+                if (sources.includes(destSel.value)) { toast('The destination port cannot also be a source.', 'err'); return; }
                 propose('mirror.set', {
                   session: Number(sessionSel.value), destination: destSel.value,
                   direction: dirSel.value, ports: sources,
@@ -213,10 +213,10 @@ const mirror = {
               },
             }),
             h('button.btn', {
-              text: 'Spiegelung entfernen',
+              text: 'Remove mirroring',
               onclick: () => {
                 const sources = [...sourcePicker.selectedOptions].map((o) => o.value);
-                if (!sources.length) { toast('Quellports wählen, die entfernt werden sollen.', 'err'); return; }
+                if (!sources.length) { toast('Select the source ports to remove.', 'err'); return; }
                 propose('mirror.set', {
                   session: Number(sessionSel.value), ports: sources, remove: true,
                 }).then((ok) => ok && refresh());
@@ -225,7 +225,7 @@ const mirror = {
           ),
         ),
       ),
-      h('p.note', { text: 'Der Zielport leitet währenddessen keinen normalen Verkehr mehr weiter.' }),
+      h('p.note', { text: 'While mirroring, the destination port no longer forwards normal traffic.' }),
     ]));
   },
 };

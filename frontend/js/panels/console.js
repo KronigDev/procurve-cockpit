@@ -17,20 +17,20 @@ const QUICK = [
 
 export default {
   id: 'console',
-  title: 'CLI-Konsole',
+  title: 'CLI console',
   icon: '›_',
   group: 'System',
 
   async render(root) {
     root.appendChild(h('div.page-head', null,
-      h('h2', { text: 'CLI-Konsole' }),
-      h('p', { text: 'Direkter Zugriff auf dieselbe SSH-Sitzung — hier geht alles, was der Switch kann.' }),
+      h('h2', { text: 'CLI console' }),
+      h('p', { text: 'Direct access to the same SSH session — anything the switch can do works here.' }),
     ));
 
     const out = h('div.console-out');
     const promptLabel = h('span', { text: '#' });
     const line = h('input', {
-      placeholder: 'Befehl eingeben … (↑/↓ Verlauf, Tab-Vervollständigung macht der Switch nicht mit)',
+      placeholder: 'Type a command … (↑/↓ for history; the switch does not do tab completion)',
       spellcheck: 'false', autocomplete: 'off',
     });
 
@@ -50,11 +50,11 @@ export default {
     }
     quickBar.appendChild(h('span.spacer'));
     quickBar.appendChild(h('button.btn.btn-sm', {
-      text: 'Mitschnitt speichern',
+      text: 'Save transcript',
       onclick: () => downloadText('cli-transcript.txt', transcript),
     }));
     quickBar.appendChild(h('button.btn.btn-sm', {
-      text: 'Leeren',
+      text: 'Clear',
       onclick: () => { out.replaceChildren(); transcript = ''; },
     }));
 
@@ -69,9 +69,9 @@ export default {
     const ws = new WebSocket(`${proto}://${location.host}/ws/cli?token=${encodeURIComponent(state.token)}`);
     let ready = false;
 
-    ws.addEventListener('open', () => { ready = true; write('* verbunden', 'c-sys'); });
-    ws.addEventListener('close', () => { ready = false; write('* Verbindung zur Konsole beendet', 'c-sys'); });
-    ws.addEventListener('error', () => write('* Konsolen-Socket-Fehler', 'c-err'));
+    ws.addEventListener('open', () => { ready = true; write('* connected', 'c-sys'); });
+    ws.addEventListener('close', () => { ready = false; write('* console connection closed', 'c-sys'); });
+    ws.addEventListener('error', () => write('* console socket error', 'c-err'));
     ws.addEventListener('message', (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg.type === 'prompt') {
@@ -93,7 +93,7 @@ export default {
     const send = () => {
       const command = line.value.trim();
       if (!command) return;
-      if (!ready) { toast('Konsole nicht verbunden.', 'err'); return; }
+      if (!ready) { toast('Console not connected.', 'err'); return; }
       history.push(command);
       historyIndex = history.length;
       line.value = '';
@@ -116,8 +116,8 @@ export default {
 
     setTimeout(() => line.focus(), 50);
 
-    write('ProCurve Cockpit — CLI. Konfigurationsbefehle bitte über die Panels, damit die '
-        + 'Vorschau greift. Hier laufen Befehle sofort.', 'c-sys');
+    write('ProCurve Cockpit — CLI. Use the panels for configuration changes so the preview '
+        + 'applies. Commands typed here run immediately.', 'c-sys');
 
     // Tear the socket down when the panel is replaced.
     return () => { try { ws.close(); } catch { /* already gone */ } };

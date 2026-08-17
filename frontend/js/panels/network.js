@@ -9,31 +9,31 @@ import {
 
 const neighbors = {
   id: 'neighbors',
-  title: 'Nachbarn',
+  title: 'Neighbours',
   icon: '⇋',
-  group: 'Diagnose',
+  group: 'Diagnostics',
 
   async render(root) {
     const { data } = await api.data('neighbors');
     const list = data.lldp.data || [];
 
     root.appendChild(h('div.page-head', null,
-      h('h2', { text: 'Nachbargeräte' }),
-      h('p', { text: `${list.length} über LLDP gemeldet` }),
+      h('h2', { text: 'Neighbouring devices' }),
+      h('p', { text: `${list.length} reported via LLDP` }),
     ));
 
     root.appendChild(card('LLDP', data.lldp.command, [
       table([
-        { key: 'port', label: 'Lokaler Port', mono: true },
-        { key: 'system_name', label: 'Gerät' },
-        { key: 'chassis_id', label: 'Chassis-ID', mono: true },
-        { key: 'port_id', label: 'Remote-Port', mono: true },
-        { key: 'port_descr', label: 'Beschreibung' },
+        { key: 'port', label: 'Local port', mono: true },
+        { key: 'system_name', label: 'Device' },
+        { key: 'chassis_id', label: 'Chassis id', mono: true },
+        { key: 'port_id', label: 'Remote port', mono: true },
+        { key: 'port_descr', label: 'Description' },
       ], list),
       rawBlock(data.lldp),
     ], null, true));
 
-    root.appendChild(rawCard('LLDP Details', data.lldp_detail));
+    root.appendChild(rawCard('LLDP detail', data.lldp_detail));
     root.appendChild(rawCard('CDP', data.cdp));
   },
 };
@@ -42,7 +42,7 @@ const forwarding = {
   id: 'forwarding',
   title: 'MAC & ARP',
   icon: '≡',
-  group: 'Diagnose',
+  group: 'Diagnostics',
 
   async render(root) {
     const { data } = await api.data('forwarding');
@@ -62,31 +62,31 @@ const forwarding = {
         { key: 'mac', label: 'MAC', mono: true },
         { key: 'port', label: 'Port', mono: true },
         { key: 'vlan', label: 'VLAN', mono: true },
-        { key: 'ip', label: 'IP (aus ARP)', mono: true, render: (m) => ipByMac.get(normMac(m.mac)) || '' },
+        { key: 'ip', label: 'IP (from ARP)', mono: true, render: (m) => ipByMac.get(normMac(m.mac)) || '' },
       ], rows));
     };
     drawMacs();
 
     root.appendChild(h('div.page-head', null,
-      h('h2', { text: 'MAC- & ARP-Tabelle' }),
-      h('p', { text: `${macs.length} MAC-Einträge · ${arps.length} ARP-Einträge` }),
+      h('h2', { text: 'MAC & ARP tables' }),
+      h('p', { text: `${macs.length} MAC entries · ${arps.length} ARP entries` }),
     ));
 
-    root.appendChild(card('MAC-Adresstabelle', data.mac.command, [
+    root.appendChild(card('MAC address table', data.mac.command, [
       h('div.toolbar', null, input({
         type: 'search',
-        placeholder: 'MAC, Port, VLAN oder IP suchen …',
+        placeholder: 'Search MAC, port, VLAN or IP …',
         oninput: (ev) => { needle = ev.target.value.trim().toLowerCase(); drawMacs(); },
       })),
       macHost,
       rawBlock(data.mac),
     ]));
 
-    root.appendChild(card('ARP-Tabelle', data.arp.command, [
+    root.appendChild(card('ARP table', data.arp.command, [
       table([
         { key: 'ip', label: 'IP', mono: true },
         { key: 'mac', label: 'MAC', mono: true },
-        { key: 'type', label: 'Typ' },
+        { key: 'type', label: 'Type' },
         { key: 'port', label: 'Port', mono: true },
       ], arps),
       rawBlock(data.arp),
@@ -98,7 +98,7 @@ const routing = {
   id: 'routing',
   title: 'IP & Routing',
   icon: '⇢',
-  group: 'Konfiguration',
+  group: 'Configuration',
 
   async render(root, ctx) {
     const { data } = await api.data('routing');
@@ -110,31 +110,31 @@ const routing = {
 
     root.appendChild(h('div.page-head', null,
       h('h2', { text: 'IP & Routing' }),
-      h('p', { text: `${ips.length} VLAN-Interfaces · ${routes.length} Routen` }),
+      h('p', { text: `${ips.length} VLAN interfaces · ${routes.length} routes` }),
     ));
 
-    root.appendChild(card('IP-Adressen pro VLAN', data.ip.command, [
+    root.appendChild(card('IP addresses per VLAN', data.ip.command, [
       table([
         { key: 'vlan', label: 'VLAN', mono: true },
-        { key: 'config', label: 'Modus' },
-        { key: 'ip', label: 'Adresse', mono: true },
-        { key: 'mask', label: 'Maske', mono: true },
+        { key: 'config', label: 'Mode' },
+        { key: 'ip', label: 'Address', mono: true },
+        { key: 'mask', label: 'Mask', mono: true },
       ], ips),
       rawBlock(data.ip),
     ], null, true));
 
-    root.appendChild(card('Routing-Tabelle', data.routes.command, [
+    root.appendChild(card('Routing table', data.routes.command, [
       table([
-        { key: 'destination', label: 'Ziel', mono: true },
+        { key: 'destination', label: 'Destination', mono: true },
         { key: 'gateway', label: 'Gateway', mono: true },
         { key: 'vlan', label: 'VLAN', mono: true },
         {
           key: 'type',
-          label: 'Typ',
+          label: 'Type',
           render: (r) => badge(r.type || '—', /connect/i.test(r.type) ? 'ok' : 'mute'),
         },
-        { key: 'metric', label: 'Metrik', num: true },
-        { key: 'distance', label: 'Distanz', num: true },
+        { key: 'metric', label: 'Metric', num: true },
+        { key: 'distance', label: 'Distance', num: true },
       ], routes),
       rawBlock(data.routes),
     ], null, true));
@@ -142,19 +142,19 @@ const routing = {
     // -- editor -------------------------------------------------------------
     const destInput = input({ placeholder: '10.20.0.0/24' });
     const gwInput = input({ placeholder: '192.168.1.254' });
-    const distInput = input({ type: 'number', placeholder: 'Distanz (optional)' });
+    const distInput = input({ type: 'number', placeholder: 'distance (optional)' });
     const defGwInput = input({ placeholder: '192.168.1.1' });
 
     root.appendChild(h('div.grid.cols-2', null,
-      card('Statische Route', null, [
-        field('Ziel-Netz (CIDR)', destInput),
+      card('Static route', null, [
+        field('Destination network (CIDR)', destInput),
         field('Gateway', gwInput),
-        field('Administrative Distanz', distInput),
+        field('Administrative distance', distInput),
         h('div.form-actions', null,
           h('button.btn.btn-primary', {
-            text: 'Route hinzufügen',
+            text: 'Add route',
             onclick: () => {
-              if (!destInput.value || !gwInput.value) { toast('Ziel und Gateway angeben.', 'err'); return; }
+              if (!destInput.value || !gwInput.value) { toast('Enter destination and gateway.', 'err'); return; }
               propose('routing.set', {
                 add_routes: [{
                   destination: destInput.value,
@@ -165,9 +165,9 @@ const routing = {
             },
           }),
           h('button.btn', {
-            text: 'Route entfernen',
+            text: 'Remove route',
             onclick: () => {
-              if (!destInput.value || !gwInput.value) { toast('Ziel und Gateway angeben.', 'err'); return; }
+              if (!destInput.value || !gwInput.value) { toast('Enter destination and gateway.', 'err'); return; }
               propose('routing.set', {
                 remove_routes: [{ destination: destInput.value, gateway: gwInput.value }],
               }).then((ok) => ok && refresh());
@@ -175,24 +175,24 @@ const routing = {
           }),
         ),
       ]),
-      card('Globales Routing', null, [
-        h('p.note', { text: `IP-Routing ist derzeit ${routingOn ? 'aktiv' : 'vermutlich inaktiv'}.` }),
+      card('Global routing', null, [
+        h('p.note', { text: `IP routing is currently ${routingOn ? 'enabled' : 'probably disabled'}.` }),
         h('div.form-actions', null,
           h('button.btn', {
-            text: 'IP-Routing einschalten',
+            text: 'Enable IP routing',
             onclick: () => propose('routing.set', { enabled: true }).then((ok) => ok && refresh()),
           }),
           h('button.btn', {
-            text: 'IP-Routing ausschalten',
+            text: 'Disable IP routing',
             onclick: () => propose('routing.set', { enabled: false }).then((ok) => ok && refresh()),
           }),
         ),
-        field('Default-Gateway', defGwInput, '(nur ohne IP-Routing relevant)'),
+        field('Default gateway', defGwInput, '(only relevant without IP routing)'),
         h('div.form-actions', null,
           h('button.btn.btn-primary', {
-            text: 'Default-Gateway setzen',
+            text: 'Set default gateway',
             onclick: () => {
-              if (!defGwInput.value) { toast('Gateway angeben.', 'err'); return; }
+              if (!defGwInput.value) { toast('Enter a gateway.', 'err'); return; }
               propose('routing.set', { default_gateway: defGwInput.value }).then((ok) => ok && refresh());
             },
           }),
@@ -201,7 +201,7 @@ const routing = {
     ));
 
     root.appendChild(rawCard('RIP', data.rip));
-    root.appendChild(rawCard('DHCP Helper-Adressen', data.helper));
+    root.appendChild(rawCard('DHCP helper addresses', data.helper));
   },
 };
 

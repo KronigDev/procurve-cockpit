@@ -30,7 +30,7 @@ async function request(method, path, body) {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch (err) {
-    throw new ApiError(`Backend nicht erreichbar: ${err.message}`, 0);
+    throw new ApiError(`Backend unreachable: ${err.message}`, 0);
   }
 
   const text = await res.text();

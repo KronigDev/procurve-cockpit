@@ -470,6 +470,10 @@ class CommandResult:
     command: str
     output: str
     error: str | None = None
+    #: Everything that came back, echo and trailing prompt included. Kept so a
+    #: command whose output ends up empty can still be inspected in the UI --
+    #: "(empty)" on its own is impossible to debug.
+    transcript: str = ""
 
     @property
     def ok(self) -> bool:
@@ -650,16 +654,29 @@ class ProCurveShell:
             self.last_raw = collected
             self._update_state(collected)
             body = self._strip_echo_and_prompt(collected, command)
-            return CommandResult(command=command, output=body, error=detect_error(body))
+            return CommandResult(
+                command=command,
+                output=body,
+                error=detect_error(body) or detect_error(collected),
+                transcript=collected,
+            )
 
     @staticmethod
     def _strip_echo_and_prompt(text: str, command: str) -> str:
         lines = text.split("\n")
-        # Drop the echoed command (it may be preceded by the prompt on the same line).
+        cmd = command.strip()
+        # Drop the echoed command, cutting only the command text itself rather
+        # than the whole line.  The "Status and Counters" screens position the
+        # cursor instead of sending newlines, so once the escape sequences are
+        # gone the echo and the first line of real output can share a line --
+        # dropping that line would swallow the entire reply.
         for idx, line in enumerate(lines[:3]):
-            if command.strip() and command.strip() in line:
-                lines = lines[idx + 1 :]
-                break
+            pos = line.find(cmd) if cmd else -1
+            if pos == -1:
+                continue
+            rest = line[pos + len(cmd) :].strip()
+            lines = ([rest] if rest else []) + lines[idx + 1 :]
+            break
         # Drop the trailing prompt.
         while lines and (not lines[-1].strip() or PROMPT_RE.search(lines[-1])):
             if PROMPT_RE.search(lines[-1]):

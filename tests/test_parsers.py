@@ -18,7 +18,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from backend import parsers as P  # noqa: E402
 from backend import plan  # noqa: E402
-from backend.transport import clean, detect_error, render_overwrites  # noqa: E402
+from backend.transport import (  # noqa: E402
+    ProCurveShell,
+    clean,
+    detect_error,
+    render_overwrites,
+)
 
 # --------------------------------------------------------------------------
 # samples
@@ -211,6 +216,25 @@ def check(name):
         CHECKS.append((name, fn))
         return fn
     return wrap
+
+
+@check("echo stripping keeps output that shares the echo's line")
+def _t_strip_echo():
+    strip = ProCurveShell._strip_echo_and_prompt
+
+    normal = "SW# show version\nImage stamp: /sw/code\n\nSW# "
+    assert strip(normal, "show version") == "Image stamp: /sw/code"
+
+    # Some status screens position the cursor instead of sending newlines, so
+    # after escape stripping the echo and the first line of output share one
+    # line. Dropping the whole line used to swallow the entire reply.
+    fused = "SW# show system-information Status and Counters\n  System Name : SW\nSW# "
+    assert strip(fused, "show system-information") == (
+        "Status and Counters\n  System Name : SW"
+    )
+
+    # A command that genuinely says nothing must still come back empty.
+    assert strip("SW# no page\nSW# ", "no page") == ""
 
 
 @check("show interfaces config")
@@ -476,7 +500,7 @@ def main() -> int:
             print(f"ERROR {name}\n      {type(exc).__name__}: {exc}")
         else:
             print(f"ok    {name}")
-    print(f"\n{len(CHECKS) - failed}/{len(CHECKS)} bestanden")
+    print(f"\n{len(CHECKS) - failed}/{len(CHECKS)} passed")
     return 1 if failed else 0
 
 

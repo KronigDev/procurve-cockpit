@@ -9,7 +9,7 @@ import { downloadText } from './system.js';
 
 export default {
   id: 'config',
-  title: 'Konfiguration',
+  title: 'Configuration',
   icon: '⎘',
   group: 'System',
 
@@ -18,8 +18,8 @@ export default {
     const refresh = () => ctx.reload();
 
     root.appendChild(h('div.page-head', null,
-      h('h2', { text: 'Konfiguration' }),
-      h('p', { text: `${data.running.length} Zeilen running-config` }),
+      h('h2', { text: 'Configuration' }),
+      h('p', { text: `${data.running.length} lines of running-config` }),
       h('span.spacer'),
       data.unsaved
         ? badge('running ≠ startup', 'warn')
@@ -29,10 +29,10 @@ export default {
     // ── diff ─────────────────────────────────────────────────────────
     const diffNodes = (data.diff || []).map((line) =>
       h('div', { class: line.kind, text: line.text }));
-    root.appendChild(card('Unterschied startup → running', null, [
+    root.appendChild(card('Difference startup → running', null, [
       data.diff && data.diff.length
         ? h('div.diff', null, diffNodes)
-        : h('p.note', { text: 'Running- und Startup-Konfiguration sind identisch.' }),
+        : h('p.note', { text: 'Running and startup configuration are identical.' }),
       h('div.form-actions', null,
         h('button.btn.btn-save', {
           text: 'write memory (running → startup)',
@@ -44,7 +44,7 @@ export default {
 
     // ── backup / restore ─────────────────────────────────────────────
     const uploadArea = h('textarea', {
-      placeholder: 'Konfigurationszeilen hier einfügen oder eine Datei wählen …',
+      placeholder: 'Paste configuration lines here, or pick a file …',
       style: { minHeight: '180px' },
     });
     const fileInput = h('input', {
@@ -53,24 +53,24 @@ export default {
         const file = ev.target.files[0];
         if (!file) return;
         uploadArea.value = await file.text();
-        toast(`${file.name} geladen (${uploadArea.value.split('\n').length} Zeilen)`, 'info');
+        toast(`${file.name} loaded (${uploadArea.value.split('\n').length} lines)`, 'info');
       },
     });
-    const saveAfter = checkbox('Nach dem Übertragen speichern (write memory)', false);
+    const saveAfter = checkbox('Save after transfer (write memory)', false);
 
     root.appendChild(h('div.grid.cols-2', null,
-      card('Sicherung', null, [
-        h('p.note', { text: 'Lädt die aktuelle running-config als Textdatei herunter.' }),
+      card('Backup', null, [
+        h('p.note', { text: 'Downloads the current running-config as a text file.' }),
         h('div.form-actions', null,
           h('button.btn.btn-primary', {
-            text: 'running-config herunterladen',
+            text: 'Download running-config',
             onclick: () => {
               const name = `${(state.system?.info?.data?.name || 'switch')}-${stamp()}.cfg`;
               downloadText(name, data.running.join('\n') + '\n');
             },
           }),
           h('button.btn', {
-            text: 'startup-config herunterladen',
+            text: 'Download startup-config',
             onclick: () => {
               const name = `${(state.system?.info?.data?.name || 'switch')}-startup-${stamp()}.cfg`;
               downloadText(name, data.startup.join('\n') + '\n');
@@ -78,26 +78,25 @@ export default {
           }),
         ),
       ]),
-      card('Wiederherstellen / Zeilen einspielen', null, [
+      card('Restore / push lines', null, [
         h('div.form-actions', null, fileInput),
         uploadArea,
         saveAfter.el,
         h('div.form-actions', null,
           h('button.btn.btn-primary', {
-            text: 'Vorschau & Übertragen',
+            text: 'Preview & transfer',
             onclick: () => {
               const lines = uploadArea.value.split('\n')
                 .map((l) => l.replace(/\s+$/, ''))
                 .filter((l) => l.trim() && !l.trim().startsWith(';'));
-              if (!lines.length) { toast('Keine Zeilen zum Übertragen.', 'err'); return; }
+              if (!lines.length) { toast('Nothing to transfer.', 'err'); return; }
               propose('raw', { lines }).then((ok) => ok && refresh());
             },
           }),
         ),
         h('p.note', {
-          text: 'ProVision kennt kein atomares "config replace". Die Zeilen werden in die '
-              + 'laufende Konfiguration eingemischt — vorhandene Einstellungen, die in der Datei '
-              + 'fehlen, bleiben bestehen.',
+          text: 'ProVision has no atomic "config replace". The lines are merged into the running '
+              + 'configuration — existing settings that are missing from the file stay in place.',
         }),
       ]),
     ));
@@ -108,24 +107,24 @@ export default {
     ]));
 
     // ── dangerous operations ─────────────────────────────────────────
-    root.appendChild(card('Neustart & Zurücksetzen', null, [
+    root.appendChild(card('Reboot & reset', null, [
       h('div.form-actions', null,
         h('button.btn.btn-danger', {
-          text: 'Switch neu starten (reload)',
+          text: 'Reboot the switch (reload)',
           onclick: () => confirmDangerous(
-            'Switch neu starten?',
-            'Der Switch startet neu. Nicht gespeicherte Änderungen gehen verloren, die '
-              + 'Verbindung bricht ab und alle Ports sind für ca. eine Minute tot.',
+            'Reboot the switch?',
+            'The switch reboots. Unsaved changes are lost, this connection drops, and every '
+              + 'port is dead for about a minute.',
             'reload',
             refresh,
           ),
         }),
         h('button.btn.btn-danger', {
-          text: 'Werkszustand (erase startup-config)',
+          text: 'Factory reset (erase startup-config)',
           onclick: () => confirmDangerous(
-            'Startup-Konfiguration löschen?',
-            'Nach dem nächsten Neustart hat der Switch Werkseinstellungen — inklusive '
-              + 'verlorener IP-Adresse. Danach ist nur noch die serielle Konsole sicher erreichbar.',
+            'Erase the startup configuration?',
+            'After the next reboot the switch is back to factory defaults — including losing '
+              + 'its IP address. Only the serial console is guaranteed to reach it after that.',
             'erase startup-config',
             refresh,
           ),
@@ -147,7 +146,7 @@ function stamp() {
  */
 function confirmDangerous(title, warning, command, after) {
   const confirmInput = h('input', { placeholder: command, spellcheck: 'false' });
-  const goBtn = h('button.btn.btn-danger', { text: 'Ausführen', disabled: true });
+  const goBtn = h('button.btn.btn-danger', { text: 'Run', disabled: true });
   confirmInput.addEventListener('input', () => {
     goBtn.disabled = confirmInput.value.trim() !== command;
   });
@@ -156,11 +155,11 @@ function confirmDangerous(title, warning, command, after) {
     closeModal();
     try {
       const result = await execCommand(command, 30);
-      toast(result.ok ? `"${command}" gesendet` : 'Switch hat abgelehnt', result.ok ? 'ok' : 'err',
+      toast(result.ok ? `"${command}" sent` : 'Switch refused', result.ok ? 'ok' : 'err',
         result.error || result.output?.slice(0, 200) || '');
     } catch (err) {
       // A reload legitimately kills the session mid-command.
-      toast('Verbindung beendet — vermutlich startet der Switch neu.', 'info', err.message);
+      toast('Connection closed — the switch is probably rebooting.', 'info', err.message);
     }
     after();
   });
@@ -168,12 +167,12 @@ function confirmDangerous(title, warning, command, after) {
   openModal(title, h('div', null,
     h('div.risk.danger', null, h('b', { text: '⚠' }), h('span', { text: warning })),
     h('div.confirm-box', null,
-      h('label', { text: `Tippe zur Bestätigung exakt: ${command}` }),
+      h('label', { text: `Type this exactly to confirm: ${command}` }),
       confirmInput,
     ),
   ), [
     h('span.spacer'),
-    h('button.btn.btn-ghost', { text: 'Abbrechen', onclick: closeModal }),
+    h('button.btn.btn-ghost', { text: 'Cancel', onclick: closeModal }),
     goBtn,
   ]);
 }

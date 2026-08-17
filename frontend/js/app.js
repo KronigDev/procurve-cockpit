@@ -30,7 +30,7 @@ const PANELS = [
   consolePanel,
 ];
 
-const GROUP_ORDER = ['Status', 'Konfiguration', 'Sicherheit', 'Diagnose', 'System'];
+const GROUP_ORDER = ['Status', 'Configuration', 'Security', 'Diagnostics', 'System'];
 
 let current = null;
 let cleanup = null;
@@ -58,7 +58,7 @@ loginForm.addEventListener('submit', async (ev) => {
 
   loginError.hidden = true;
   loginBtn.disabled = true;
-  loginBtn.textContent = 'Verbinde …';
+  loginBtn.textContent = 'Connecting …';
   try {
     const result = await api.connect(payload);
     state.token = result.token;
@@ -72,7 +72,7 @@ loginForm.addEventListener('submit', async (ev) => {
     loginError.textContent = err.message;
   } finally {
     loginBtn.disabled = false;
-    loginBtn.textContent = 'Verbinden';
+    loginBtn.textContent = 'Connect';
   }
 });
 
@@ -87,7 +87,7 @@ function startApp() {
   goto(location.hash.replace('#', '') || 'dashboard');
 
   if (state.hostKey) {
-    toast('Verbunden', 'ok', `Hostkey ${state.hostKey.type}\n${state.hostKey.sha256}`, 7000);
+    toast('Connected', 'ok', `Host key ${state.hostKey.type}\n${state.hostKey.sha256}`, 7000);
   }
 }
 
@@ -147,7 +147,7 @@ function updateTopbar() {
     tstat(info.cpu ? `${String(info.cpu).replace(/\D/g, '')} %` : '—', 'CPU'),
     tstat(memTotal && memFree
       ? `${Math.round(((memTotal - memFree) / memTotal) * 100)} %`
-      : '—', 'Speicher'),
+      : '—', 'Memory'),
     tstat(String(state.caps.port_count || '—'), 'Ports'),
   );
 }
@@ -171,7 +171,7 @@ async function goto(id) {
   }
 
   const main = document.getElementById('main');
-  main.replaceChildren(loading(`${panel.title} wird geladen …`));
+  main.replaceChildren(loading(`Loading ${panel.title} …`));
   setBusy(true);
   setStatus(`${panel.title} …`);
 
@@ -184,17 +184,17 @@ async function goto(id) {
   } catch (err) {
     main.replaceChildren(h('div.card', null, h('div.card-body', null,
       h('div.risk.danger', null,
-        h('b', { text: 'Fehler:' }),
+        h('b', { text: 'Error:' }),
         h('span', { text: err.message }),
       ),
       h('p.note', {
         text: err.status === 401
-          ? 'Die Sitzung ist abgelaufen. Bitte neu verbinden.'
-          : 'Der Switch hat nicht wie erwartet geantwortet. Die CLI-Konsole zeigt, was wirklich zurückkommt.',
+          ? 'The session expired. Please connect again.'
+          : 'The switch did not answer as expected. The CLI console shows what really comes back.',
       }),
       h('div.form-actions', null,
-        h('button.btn', { text: 'Erneut versuchen', onclick: () => goto(panel.id) }),
-        h('button.btn', { text: 'Zur CLI-Konsole', onclick: () => goto('console') }),
+        h('button.btn', { text: 'Retry', onclick: () => goto(panel.id) }),
+        h('button.btn', { text: 'Open CLI console', onclick: () => goto('console') }),
       ),
     )));
     if (err.status === 401) showLogin();

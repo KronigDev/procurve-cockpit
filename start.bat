@@ -1,4 +1,4 @@
 @echo off
-REM Doppelklick-Starter fuer ProCurve Cockpit.
+REM Double-click launcher for ProCurve Cockpit.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1" %*
 pause

@@ -1,124 +1,149 @@
 # Changelog
 
-Alle nennenswerten Änderungen an ProCurve Cockpit stehen hier.
+All notable changes to ProCurve Cockpit are recorded here.
 
-Das Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/),
-die Versionierung an [Semantic Versioning](https://semver.org/lang/de/).
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+the versioning follows [Semantic Versioning](https://semver.org/).
 
-## [Unveröffentlicht]
+## [1.1.0] — 2026-08-17
 
-### Behoben
+First run against real hardware, and the language of the whole project switched
+to English.
 
-- Das Änderungs-Modal war dauerhaft sichtbar und ließ sich nicht wegklicken.
-  Dem Stylesheet fehlte eine `[hidden]`-Regel: jede Autoren-Regel mit `display`
-  schlägt das `[hidden] { display: none }` des Browsers, `.modal-backdrop`
-  hatte also gewonnen. Betraf auch `#app` und die Badges.
+### Fixed
 
-### Geändert
+- **The change modal was permanently visible and could not be dismissed.** The
+  stylesheet had no `[hidden]` rule, and any author rule carrying `display`
+  beats the browser's `[hidden] { display: none }` however specific it is — so
+  `.modal-backdrop { display: grid }` won. This also affected `#app` and the
+  badges, meaning the app shell was already drawn behind the login screen.
+- **The port search found nothing for `U100`.** It matched against
+  `JSON.stringify(port)`, where the untagged VLAN is just `100`; the `U100`
+  shorthand only exists in the rendered table. Search now runs against a
+  purpose-built haystack that includes the printed shorthand, link state and
+  neighbour name.
+- **The search box was unstyled.** `input[type=search]` was missing from the
+  form-control selector, so the browser default leaked through.
+- **`show system-information` could come back empty.** Echo removal dropped the
+  whole first line; when the echo and the first line of output share a line, that
+  swallowed the entire reply. Only the command text is cut now.
 
-- Die Port-Auswahl zeigt jetzt den **aktuellen** Zustand statt „unverändert“.
-  Dafür wird zusätzlich `show interfaces config` gelesen — `show interfaces
-  brief` liefert nur den ausgehandelten Zustand (`1000FDx`, `MDIX`), nicht den
-  konfigurierten (`Auto`, `Auto-MDIX`). Neu ebenfalls gelesen: `show lldp
-  config` und `show spanning-tree config`.
-- Jedes Feld merkt sich seinen Ausgangswert und wird nur gesendet, wenn es
-  davon abweicht. Vorbelegen erzeugt damit keine Konfigurationszeile.
-- Bei Mehrfachauswahl mit unterschiedlichen Werten steht „gemischt“ statt
-  eines willkürlich gewählten Werts.
-- Bei einem einzelnen Port steht oben im Inspektor eine Übersicht: Status,
-  Typ, VLANs, Trunk, LLDP-Nachbar.
+### Changed
 
-### Robustheit
+- **Everything is in English** — interface, README, changelog, comments, start
+  scripts.
+- The port inspector opens on the **current** state instead of “unchanged”. This
+  needs `show interfaces config` in addition: `show interfaces brief` only
+  reports the negotiated state (`1000FDx`, `MDIX`), not the configured one
+  (`Auto`, `Auto-MDIX`). Also read now: `show lldp config` and
+  `show spanning-tree config`.
+- Each field remembers the value it started with and is only sent when it moved
+  away from it, so preselecting never produces a configuration line.
+- With a multi-port selection, differing values read “mixed” instead of showing
+  an arbitrarily chosen one.
+- A single selected port gets a summary at the top of the inspector: status,
+  type, VLANs, trunk, LLDP neighbour.
+- **The membership matrix was rewritten for legibility**: larger cells, a
+  cross hair that lights up the row and column under the pointer, a heavier rule
+  every four ports, port names next to port numbers, VLAN colour dots in the
+  column heads, and a legend. Clicking a column head edits that VLAN.
+- Port selection gained explicit *Select all*, *Clear selection*, *Invert*,
+  *Only up / down / disabled*, a header checkbox that acts on the filtered rows
+  only, and a *Select listed* button next to the search.
 
-- `Up Time` und `CPU Util` werden zusätzlich per Textsuche gefunden, falls die
-  Firmware den zweispaltigen Statusblock anders umbricht als dokumentiert.
+### Robustness
+
+- A command that returns nothing now surfaces its **full transcript**, echo and
+  prompt included. A bare “(empty)” is impossible to diagnose.
+- `show system-information` falls back to `show system information` and
+  `show system` when the first spelling produces nothing.
+- `Up Time` and `CPU Util` are additionally located by scanning the raw text, in
+  case the firmware wraps the two-column status block differently than
+  documented.
 
 ## [1.0.0] — 2026-08-17
 
-Erste Fassung. Vollständige Weboberfläche für HP/Aruba ProVision-Switches,
-gebaut für den HP 2910al-24G.
+Initial release. Complete web interface for HP/Aruba ProVision switches, built
+for the HP 2910al-24G.
 
-### Hinzugefügt
+### Added
 
 **Transport**
-- SSH-Verbindung mit Legacy-Krypto: `diffie-hellman-group14-sha1`,
-  `diffie-hellman-group1-sha1`, Hostkey `ssh-rsa`, `aes*-cbc`, `hmac-sha1`.
-  Die alten Verfahren werden bevorzugt, die modernen bleiben aktiv — es wird
-  nichts abgeschaltet.
-- Telnet-Fallback mit eigener RFC-854-Implementierung, da Python 3.13
-  `telnetlib` entfernt hat.
-- Persistente, serialisierte CLI-Sitzung (der Switch erlaubt nur eine).
-- Prompt-Erkennung inklusive Kontext (`SW(config)#`), automatisches `no page`,
-  VT100-Bereinigung und CR/Backspace-Overlay, damit `-- MORE --`-Reste
-  verschwinden.
-- Fehlererkennung getrennt nach zeilenanfangs-verankerten Präfixen und
-  eindeutigen Phrasen, damit Wörter wie „failed" im Event-Log keine
-  Falschmeldung auslösen.
+- SSH connection with legacy crypto: `diffie-hellman-group14-sha1`,
+  `diffie-hellman-group1-sha1`, host key `ssh-rsa`, `aes*-cbc`, `hmac-sha1`.
+  The old algorithms are preferred, the modern ones stay active — nothing is
+  disabled.
+- Telnet fallback with a hand-written RFC 854 implementation, since Python 3.13
+  removed `telnetlib`.
+- Persistent, serialised CLI session (the switch permits only one).
+- Prompt detection including context (`SW(config)#`), automatic `no page`,
+  VT100 cleanup and CR/backspace overlay so `-- MORE --` leftovers disappear.
+- Error detection split into line-anchored prefixes and unambiguous phrases, so
+  a word like “failed” in the event log raises no false alarm.
 
-**Parser**
-- Generischer ProCurve-Tabellenparser, der Spaltengrenzen aus der Trennlinie
-  (`---- + ----`) ableitet statt aus festen Offsets — überlebt damit
-  Formatunterschiede zwischen Firmware-Ständen.
-- Mehrzeilige Kopfzeilen werden zusammengefasst und doppelte Spaltennamen
-  entschärft (`show trunks` hat zwei Spalten namens `Type`).
-- Key/Value-Parser für zwei Paare pro Zeile plus eigener Block für die
-  zweispaltige Speicheranzeige.
-- Parser für Ports, Port-Namen, VLANs, VLAN-Mitgliedschaft, Trunks, LACP,
-  LLDP, MAC-Tabelle, ARP, PoE, STP, IP-Konfiguration, Routen, Flash, Module,
-  SNMP-Communities sowie Config-Text und Config-Diff.
+**Parsers**
+- Generic ProCurve table parser that derives column boundaries from the
+  separator line (`---- + ----`) instead of fixed offsets, which lets it survive
+  format differences between firmware trains.
+- Stacked header lines are joined and duplicate column names disambiguated
+  (`show trunks` has two columns called `Type`).
+- Key/value parser for two pairs per line, plus a dedicated block for the
+  two-column memory display.
+- Parsers for ports, port names, VLANs, VLAN membership, trunks, LACP, LLDP,
+  the MAC table, ARP, PoE, STP, IP configuration, routes, flash, modules, SNMP
+  communities, as well as config text and config diff.
 
-**Bedienkonzept**
-- Vorschau → Anwenden: jede Aktion erzeugt zuerst die exakten CLI-Zeilen,
-  zeigt sie an und wird erst nach Bestätigung ausgeführt.
-- Lockout-Risikoanalyse, die das Management-VLAN und die verbundene IP kennt
-  und damit beim eigenen VLAN warnt, nicht bei jedem. Erkannt werden u. a.
-  `no ip ssh`, IP-Änderungen am Management-VLAN, Entfernen von Ports daraus,
-  `erase startup-config`, `reload`, `crypto key zeroize`, STP abschalten.
-- Kritische Pläne verlangen zusätzlich, dass `APPLY` getippt wird.
-- 21 Intent-Übersetzer (Port, VLAN, Trunk, STP, PoE, System, Logging, SNMP,
-  Zugriff, Passwörter, Mirroring, Routing, QoS, Roh-CLI), vollständig offline
-  und testbar ohne Switch.
-- ProVision-Eigenheit berücksichtigt: ein Port kann nur in einem VLAN untagged
-  sein, die alte Mitgliedschaft wird vorher automatisch gelöst.
+**Interaction model**
+- Preview → apply: every action first produces the exact CLI lines, shows them,
+  and executes only after confirmation.
+- Lockout risk analysis that knows the management VLAN and the connected IP, and
+  therefore warns about your own VLAN rather than every VLAN. Recognised among
+  others: `no ip ssh`, IP changes on the management VLAN, removing ports from
+  it, `erase startup-config`, `reload`, `crypto key zeroize`, disabling STP.
+- Critical plans additionally require typing `APPLY`.
+- 21 intent translators (port, VLAN, trunk, STP, PoE, system, logging, SNMP,
+  access, credentials, mirroring, routing, QoS, raw CLI), entirely offline and
+  testable without a switch.
+- ProVision specifics respected: a port can only be untagged in one VLAN, so the
+  previous membership is released first, automatically.
 
-**Oberfläche**
-- 16 Panels in fünf Gruppen: Status, Konfiguration, Sicherheit, Diagnose,
+**Interface**
+- 16 panels in five groups: Status, Configuration, Security, Diagnostics,
   System.
-- Frontblenden-Ansicht in physischer Anordnung (ungerade oben), Shift-Klick
-  für Bereiche, Einfärbung nach Status, VLAN, Geschwindigkeit oder PoE.
-- Klick-Matrix Port × VLAN, die alle Änderungen sammelt und daraus einen
-  einzigen prüfbaren Plan macht.
-- Config-Diff running vs. startup, Download als `.cfg`, Einspielen von Zeilen.
-- CLI-Konsole über WebSocket auf derselben Sitzung als Escape-Hatch für alles,
-  was nicht als Panel modelliert ist.
-- Jedes Panel zeigt unten die Rohausgabe des zugehörigen `show`-Befehls, damit
-  ein danebenliegender Parser sofort sichtbar wird.
-- Vanilla ES-Module ohne Build-Step, dunkles Design.
+- Front-panel view in physical order (odd on top), shift-click for ranges,
+  colouring by status, VLAN, speed or PoE.
+- Click matrix port × VLAN that collects every change and turns it into a single
+  reviewable plan.
+- Config diff running vs startup, download as `.cfg`, pushing lines.
+- CLI console over WebSocket on the same session, as an escape hatch for
+  anything not modelled as a panel.
+- Every panel shows the raw output of its `show` command, so a parser that is
+  off becomes visible immediately.
+- Vanilla ES modules, no build step, dark design.
 
 **Backend**
-- FastAPI mit REST und WebSocket, Sitzungsverwaltung über `X-Session`-Header.
-- Fähigkeitserkennung beim Verbinden: PoE, Routing, LLDP, Stacking, Module,
-  Portanzahl.
-- TTL-Cache je `show`-Befehl; VLAN-Mitgliedschaft deutlich länger, da sie
-  N+1 Roundtrips kostet und sich nur durch eigene Änderungen ändert.
-- Bindet standardmäßig auf 127.0.0.1. Zugangsdaten liegen ausschließlich im
-  Arbeitsspeicher und werden nie auf Platte geschrieben.
+- FastAPI with REST and WebSocket, session management via an `X-Session` header.
+- Capability probing on connect: PoE, routing, LLDP, stacking, modules, port
+  count.
+- TTL cache per `show` command; VLAN membership considerably longer, since it
+  costs N+1 round trips and only changes through our own edits.
+- Binds to 127.0.0.1 by default. Credentials live in memory only and are never
+  written to disk.
 
 **Tests**
-- 19 Parser-, Plan- und Risiko-Prüfungen gegen realistische
-  K/W.15.x-Ausgaben.
-- 6 Prüfungen der HTTP-Schicht, alle ohne Switch lauffähig.
+- 19 parser, plan and risk checks against realistic K/W.15.x output.
+- 6 checks of the HTTP layer, all runnable without a switch.
 
-### Wichtig
+### Important
 
-- `paramiko` ist bewusst auf `>=3.4,<4` gepinnt. **Paramiko 4 und 5 haben
-  SHA-1-Key-Exchange und den `ssh-rsa`-Hostkey vollständig entfernt** — genau
-  das, was ein ProVision-Switch als einziges anbietet. Ein
-  `pip install -U paramiko` macht jede Verbindung unmöglich. Das Backend prüft
-  das beim Start und beim Verbindungsaufbau und meldet es im Klartext, statt
-  einen kryptischen Handshake-Fehler zu werfen.
-- Die Parser wurden gegen die dokumentierten Ausgabeformate gebaut, nicht
-  gegen ein reales Gerät. Abweichungen sind möglich; die Rohausgabe in jedem
-  Panel ist der vorgesehene Weg, sie zu finden.
+- `paramiko` is deliberately pinned to `>=3.4,<4`. **Paramiko 4 and 5 removed
+  SHA-1 key exchange and the `ssh-rsa` host key completely** — precisely what a
+  ProVision switch offers as its only option. A `pip install -U paramiko` makes
+  every connection impossible. The backend checks this at startup and on connect
+  and reports it in plain words instead of throwing a cryptic handshake error.
+- The parsers were written against documented output formats, not against a real
+  device. Deviations are possible; the raw output block in each panel is the
+  intended way to find them.
 
+[1.1.0]: https://github.com/KronigDev/procurve-cockpit/releases/tag/v1.1.0
 [1.0.0]: https://github.com/KronigDev/procurve-cockpit/releases/tag/v1.0.0

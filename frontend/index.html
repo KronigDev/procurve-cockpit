@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -23,34 +23,34 @@
       </svg>
       <div>
         <h1>ProCurve Cockpit</h1>
-        <p>HP / Aruba ProVision — 2910al, 2810, 2510, 3500yl &amp; Verwandte</p>
+        <p>HP / Aruba ProVision — 2910al, 2810, 2510, 3500yl &amp; relatives</p>
       </div>
     </div>
 
     <label class="field">
-      <span>Switch (IP oder Hostname)</span>
+      <span>Switch (IP or host name)</span>
       <input name="host" required placeholder="192.168.1.10" autocomplete="off" spellcheck="false">
     </label>
 
     <div class="field-row">
       <label class="field">
-        <span>Benutzername</span>
+        <span>User name</span>
         <input name="username" value="manager" autocomplete="off" spellcheck="false">
       </label>
       <label class="field">
-        <span>Passwort</span>
+        <span>Password</span>
         <input name="password" type="password" autocomplete="new-password">
       </label>
     </div>
 
     <details class="login-advanced">
-      <summary>Erweitert</summary>
+      <summary>Advanced</summary>
       <div class="field-row">
         <label class="field">
           <span>Transport</span>
           <select name="transport">
             <option value="ssh">SSH</option>
-            <option value="telnet">Telnet (unverschlüsselt)</option>
+            <option value="telnet">Telnet (unencrypted)</option>
           </select>
         </label>
         <label class="field">
@@ -59,19 +59,19 @@
         </label>
       </div>
       <label class="field">
-        <span>Enable-/Manager-Passwort <em>(nur falls abweichend)</em></span>
+        <span>Enable / manager password <em>(only if different)</em></span>
         <input name="enable_password" type="password" autocomplete="new-password">
       </label>
       <label class="check">
         <input type="checkbox" name="legacy" checked>
-        <span>Legacy-Krypto erlauben <em>(nötig für 2910al: dh-group14-sha1, ssh-rsa, aes-cbc)</em></span>
+        <span>Allow legacy crypto <em>(required for the 2910al: dh-group14-sha1, ssh-rsa, aes-cbc)</em></span>
       </label>
     </details>
 
-    <button type="submit" class="btn btn-primary btn-lg" id="login-btn">Verbinden</button>
+    <button type="submit" class="btn btn-primary btn-lg" id="login-btn">Connect</button>
     <div class="login-error" id="login-error" hidden></div>
     <p class="login-hint">
-      Die Zugangsdaten bleiben im Arbeitsspeicher dieses lokalen Servers und werden nirgends gespeichert.
+      Credentials stay in this local server's memory and are never written to disk.
     </p>
   </form>
 </div>
@@ -89,12 +89,12 @@
     </div>
     <div class="topbar-stats" id="topbar-stats"></div>
     <div class="topbar-actions">
-      <span class="badge badge-warn" id="unsaved-badge" hidden title="Running-Config weicht von Startup-Config ab">
-        ungespeichert
+      <span class="badge badge-warn" id="unsaved-badge" hidden title="Running config differs from startup config">
+        unsaved
       </span>
-      <button class="btn btn-ghost" id="btn-refresh" title="Aktuelle Ansicht neu laden (R)">Neu laden</button>
-      <button class="btn btn-save" id="btn-save" title="write memory">Speichern</button>
-      <button class="btn btn-ghost" id="btn-disconnect">Trennen</button>
+      <button class="btn btn-ghost" id="btn-refresh" title="Reload the current view (R)">Reload</button>
+      <button class="btn btn-save" id="btn-save" title="write memory">Save</button>
+      <button class="btn btn-ghost" id="btn-disconnect">Disconnect</button>
     </div>
   </header>
 
@@ -115,8 +115,8 @@
 <div class="modal-backdrop" id="modal" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
     <header>
-      <h2 id="modal-title">Änderung prüfen</h2>
-      <button class="icon-btn" id="modal-close" aria-label="Schließen">✕</button>
+      <h2 id="modal-title">Review change</h2>
+      <button class="icon-btn" id="modal-close" aria-label="Close">✕</button>
     </header>
     <div class="modal-body" id="modal-body"></div>
     <footer class="modal-foot" id="modal-foot"></footer>

@@ -80,13 +80,13 @@ function portTile(port, selected, colorBy, opts) {
 
 function tooltip(port) {
   const lines = [`Port ${port.port}${port.name ? ` — ${port.name}` : ''}`];
-  lines.push(`${port.up ? 'Up' : 'Down'}${port.enabled === false ? ' (administrativ deaktiviert)' : ''}`);
-  if (port.type) lines.push(`Typ: ${port.type}`);
+  lines.push(`${port.up ? 'Up' : 'Down'}${port.enabled === false ? ' (administratively disabled)' : ''}`);
+  if (port.type) lines.push(`Type: ${port.type}`);
   if (port.mode) lines.push(`Mode: ${port.mode}`);
   if (port.untagged) lines.push(`Untagged: VLAN ${port.untagged}`);
   if (port.tagged && port.tagged.length) lines.push(`Tagged: ${port.tagged.join(', ')}`);
   if (port.trunk) lines.push(`Trunk: ${port.trunk.group}`);
-  if (port.poe) lines.push(`PoE: ${port.poe.enabled ? 'aktiv' : 'aus'} ${port.poe.actual || ''}`);
+  if (port.poe) lines.push(`PoE: ${port.poe.enabled ? 'on' : 'off'} ${port.poe.actual || ''}`);
   if (port.lldp) lines.push(`LLDP: ${port.lldp.system_name || port.lldp.chassis_id} / ${port.lldp.port_id}`);
   return lines.join('\n');
 }
@@ -112,17 +112,17 @@ function groupIntoBanks(ports) {
   if (numeric.length) banks.push({ label: `Ports 1–${numeric[numeric.length - 1].port}`, ports: numeric });
   for (const [key, list] of [...modules.entries()].sort()) {
     list.sort((a, b) => String(a.port).localeCompare(String(b.port), undefined, { numeric: true }));
-    banks.push({ label: `Modul ${key}`, ports: list });
+    banks.push({ label: `Module ${key}`, ports: list });
   }
   return banks;
 }
 
 export function legend(colorBy) {
   const entries = {
-    status: [['#34d399', 'Link up'], ['#2a3546', 'Link down'], ['#f87171', 'deaktiviert'], ['#a78bfa', 'Trunk-Mitglied']],
-    vlan: [['#22d3ee', 'untagged VLAN (Farbe = VLAN-ID)'], ['#2a3546', 'keine untagged Zuordnung']],
-    speed: [['#34d399', '1 Gbit'], ['#fbbf24', '100 Mbit'], ['#22d3ee', '10 Gbit'], ['#2a3546', 'kein Link']],
-    poe: [['#fbbf24', 'liefert Strom'], ['#2a4a5a', 'PoE aktiv, kein Verbraucher'], ['#3a2020', 'PoE aus']],
+    status: [['#34d399', 'link up'], ['#2a3546', 'link down'], ['#f87171', 'disabled'], ['#a78bfa', 'trunk member']],
+    vlan: [['#22d3ee', 'untagged VLAN (colour = VLAN id)'], ['#2a3546', 'no untagged membership']],
+    speed: [['#34d399', '1 Gbit/s'], ['#fbbf24', '100 Mbit/s'], ['#22d3ee', '10 Gbit/s'], ['#2a3546', 'no link']],
+    poe: [['#fbbf24', 'delivering power'], ['#2a4a5a', 'PoE on, no consumer'], ['#3a2020', 'PoE off']],
   }[colorBy] || [];
   return h('div.fp-legend', null, entries.map(([color, label]) =>
     h('span', null, h('i', { style: { background: color } }), label)));

@@ -1,22 +1,20 @@
 <#
 .SYNOPSIS
-  Startet ProCurve Cockpit lokal.
+  Starts ProCurve Cockpit locally.
 
 .DESCRIPTION
-  Legt beim ersten Start eine virtuelle Umgebung an, installiert die
-  Abhaengigkeiten und startet den Webserver. Standardmaessig lauscht der Server
-  nur auf 127.0.0.1 - die App haelt Switch-Zugangsdaten im Speicher und gehoert
-  nicht ins Netz.
+  On first run this creates a virtual environment, installs the dependencies
+  and starts the web server. By default the server listens on 127.0.0.1 only:
+  the app holds switch credentials in memory and does not belong on a network.
 
 .PARAMETER Port
-  TCP-Port fuer die Oberflaeche (Standard 8710).
+  TCP port for the interface (default 8710).
 
 .PARAMETER Listen
-  Bind-Adresse. 0.0.0.0 macht die Oberflaeche im LAN erreichbar - nur bewusst
-  verwenden.
+  Bind address. 0.0.0.0 exposes the interface on the LAN - use deliberately.
 
 .PARAMETER NoBrowser
-  Browser nicht automatisch oeffnen.
+  Do not open a browser automatically.
 
 .EXAMPLE
   .\start.ps1
@@ -36,26 +34,26 @@ $venv = Join-Path $PSScriptRoot '.venv'
 $python = Join-Path $venv 'Scripts\python.exe'
 
 if (-not (Test-Path $python)) {
-  Write-Host 'Erstelle virtuelle Umgebung ...' -ForegroundColor Cyan
+  Write-Host 'Creating virtual environment ...' -ForegroundColor Cyan
   $sys = (Get-Command python -ErrorAction SilentlyContinue)
-  if (-not $sys) { throw 'Python wurde nicht gefunden. Bitte Python 3.11+ installieren.' }
+  if (-not $sys) { throw 'Python was not found. Please install Python 3.11 or newer.' }
   & $sys.Source -m venv $venv
 }
 
-# requirements.txt aendert sich selten; der Abgleich kostet nur eine Sekunde.
-Write-Host 'Pruefe Abhaengigkeiten ...' -ForegroundColor Cyan
+# requirements.txt rarely changes; the check costs about a second.
+Write-Host 'Checking dependencies ...' -ForegroundColor Cyan
 & $python -m pip install --quiet --disable-pip-version-check -r requirements.txt
 
 $legacyCheck = & $python -c "from backend.transport import missing_legacy_support; print('|'.join(missing_legacy_support()))"
 if ($legacyCheck) {
-  Write-Warning "Die installierte paramiko-Version unterstuetzt nicht mehr: $legacyCheck"
-  Write-Warning "SSH zu einem ProVision-Switch wird fehlschlagen. Abhilfe: pip install 'paramiko>=3.4,<4'"
+  Write-Warning "The installed paramiko version no longer supports: $legacyCheck"
+  Write-Warning "SSH to a ProVision switch will fail. Fix: pip install 'paramiko>=3.4,<4'"
 }
 
 $url = "http://$(if ($Listen -eq '0.0.0.0') { 'localhost' } else { $Listen }):$Port/"
 Write-Host ''
-Write-Host "  ProCurve Cockpit laeuft auf $url" -ForegroundColor Green
-Write-Host '  Beenden mit Strg+C' -ForegroundColor DarkGray
+Write-Host "  ProCurve Cockpit is running at $url" -ForegroundColor Green
+Write-Host '  Stop with Ctrl+C' -ForegroundColor DarkGray
 Write-Host ''
 
 if (-not $NoBrowser) {

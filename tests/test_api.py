@@ -105,7 +105,7 @@ def main() -> int:
             print(f"ERROR {name}\n      {type(exc).__name__}: {exc}")
         else:
             print(f"ok    {name}")
-    print(f"\n{len(CHECKS) - failed}/{len(CHECKS)} bestanden")
+    print(f"\n{len(CHECKS) - failed}/{len(CHECKS)} passed")
     return 1 if failed else 0
 
 

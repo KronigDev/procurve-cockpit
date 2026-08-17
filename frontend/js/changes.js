@@ -20,7 +20,7 @@ export async function propose(intent, payload) {
   try {
     plan = await api.plan(intent, { ...payload, context: { ...changeContext } });
   } catch (err) {
-    toast('Änderung nicht möglich', 'err', err.message, 6000);
+    toast('Cannot build that change', 'err', err.message, 6000);
     return false;
   }
   return showPlan(plan);
@@ -37,26 +37,26 @@ function showPlan(plan) {
     const warns = (plan.risks || []).filter((r) => r.level !== 'danger');
 
     const body = h('div', null,
-      h('p.note', { text: `${plan.commands.length} Befehl(e) werden im Konfigurationsmodus gesendet:` }),
+      h('p.note', { text: `${plan.commands.length} command(s) will be sent in configuration mode:` }),
       h('div.plan-cmds', null, plan.commands.map((cmd) => h('div', { text: cmd }))),
       (plan.notes || []).map((note) => h('p.note', { text: `ℹ ${note}` })),
       dangers.map((risk) => h('div.risk.danger', null,
-        h('b', { text: '⚠ Kritisch:' }), h('span', { text: risk.message }))),
+        h('b', { text: '⚠ Critical:' }), h('span', { text: risk.message }))),
       warns.map((risk) => h('div.risk.warn', null,
-        h('b', { text: 'Hinweis:' }), h('span', { text: risk.message }))),
+        h('b', { text: 'Note:' }), h('span', { text: risk.message }))),
     );
 
     let confirmInput = null;
     if (dangers.length) {
       confirmInput = h('input', { placeholder: 'APPLY', spellcheck: 'false' });
       body.appendChild(h('div.confirm-box', null,
-        h('label', { text: 'Diese Änderung kann dich aussperren. Tippe APPLY zum Bestätigen:' }),
+        h('label', { text: 'This change can lock you out. Type APPLY to confirm:' }),
         confirmInput,
       ));
     }
 
-    const applyBtn = h('button.btn.btn-primary', { text: 'Anwenden' });
-    const applySaveBtn = h('button.btn.btn-save', { text: 'Anwenden & Speichern' });
+    const applyBtn = h('button.btn.btn-primary', { text: 'Apply' });
+    const applySaveBtn = h('button.btn.btn-save', { text: 'Apply & save' });
 
     const gate = () => {
       const ok = !confirmInput || confirmInput.value.trim().toUpperCase() === 'APPLY';
@@ -70,14 +70,14 @@ function showPlan(plan) {
       applyBtn.disabled = true;
       applySaveBtn.disabled = true;
       setBusy(true);
-      setStatus('Sende Konfiguration …');
+      setStatus('Sending configuration …');
       try {
         const result = await api.apply(plan.commands, save);
         renderResult(plan, result, save);
         resolve(true);
         onAppliedCallback();
       } catch (err) {
-        toast('Anwenden fehlgeschlagen', 'err', err.message, 8000);
+        toast('Apply failed', 'err', err.message, 8000);
         gate();
         resolve(false);
       } finally {
@@ -89,9 +89,9 @@ function showPlan(plan) {
     applyBtn.addEventListener('click', () => run(false));
     applySaveBtn.addEventListener('click', () => run(true));
 
-    openModal(plan.title || 'Änderung prüfen', body, [
+    openModal(plan.title || 'Review change', body, [
       h('span.spacer'),
-      h('button.btn.btn-ghost', { text: 'Abbrechen', onclick: () => { closeModal(); resolve(false); } }),
+      h('button.btn.btn-ghost', { text: 'Cancel', onclick: () => { closeModal(); resolve(false); } }),
       applyBtn,
       applySaveBtn,
     ], () => resolve(false));
@@ -103,8 +103,8 @@ function renderResult(plan, result, saved) {
   const body = h('div', null,
     h('p.note', {
       text: result.ok
-        ? `Alle ${result.results.length} Befehle wurden angenommen.`
-        : `${failed.length} von ${result.results.length} Befehlen wurden abgelehnt.`,
+        ? `All ${result.results.length} commands were accepted.`
+        : `${failed.length} of ${result.results.length} commands were rejected.`,
     }),
     h('div.plan-cmds', null, (result.results || []).flatMap((r) => [
       h('div', { class: r.ok ? 'result-ok' : 'result-err', text: r.command }),
@@ -112,20 +112,20 @@ function renderResult(plan, result, saved) {
       !r.error && r.output ? h('div.out', { text: r.output.slice(0, 600) }) : null,
     ])),
     saved && result.saved
-      ? h('p.note', { text: result.saved.ok ? '💾 write memory ausgeführt.' : `write memory: ${result.saved.error}` })
+      ? h('p.note', { text: result.saved.ok ? '💾 write memory done.' : `write memory: ${result.saved.error}` })
       : null,
     !saved && result.ok
-      ? h('p.note', { text: 'Noch nicht gespeichert — bei einem Neustart geht die Änderung verloren.' })
+      ? h('p.note', { text: 'Not saved yet — a reboot would discard this change.' })
       : null,
   );
 
-  openModal(result.ok ? '✓ Angewendet' : '✕ Teilweise fehlgeschlagen', body, [
+  openModal(result.ok ? '✓ Applied' : '✕ Partially failed', body, [
     h('span.spacer'),
-    h('button.btn.btn-primary', { text: 'Schließen', onclick: closeModal }),
+    h('button.btn.btn-primary', { text: 'Close', onclick: closeModal }),
   ]);
 
-  if (result.ok) toast(saved ? 'Angewendet und gespeichert' : 'Angewendet', 'ok');
-  else toast('Switch hat Befehle abgelehnt', 'err', failed[0]?.error || '', 8000);
+  if (result.ok) toast(saved ? 'Applied and saved' : 'Applied', 'ok');
+  else toast('Switch rejected commands', 'err', failed[0]?.error || '', 8000);
 }
 
 /** Used by the console + config panels for single exec-level commands. */
@@ -143,12 +143,12 @@ export async function writeMemory() {
   setStatus('write memory …');
   try {
     const result = await api.save();
-    if (result.ok) toast('Konfiguration gespeichert', 'ok');
-    else toast('Speichern fehlgeschlagen', 'err', result.error || '');
+    if (result.ok) toast('Configuration saved', 'ok');
+    else toast('Save failed', 'err', result.error || '');
     onAppliedCallback();
     return result.ok;
   } catch (err) {
-    toast('Speichern fehlgeschlagen', 'err', err.message);
+    toast('Save failed', 'err', err.message);
     return false;
   } finally {
     setBusy(false);

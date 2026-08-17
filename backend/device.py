@@ -12,7 +12,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Sequence
 
 from .parsers import (
     diff_config,
@@ -51,9 +51,18 @@ class Fetch:
     raw: str
     data: Any = None
     error: str | None = None
+    #: Untrimmed reply, echo and prompt included. Only surfaced when `raw` came
+    #: out empty, so a panel that shows nothing can still be diagnosed.
+    transcript: str = ""
 
     def as_dict(self) -> dict[str, Any]:
-        return {"command": self.command, "raw": self.raw, "data": self.data, "error": self.error}
+        return {
+            "command": self.command,
+            "raw": self.raw,
+            "data": self.data,
+            "error": self.error,
+            "transcript": "" if self.raw.strip() else self.transcript,
+        }
 
 
 @dataclass
@@ -137,9 +146,30 @@ class ProCurveDevice:
             if hit and time.time() - hit[0] < cache:
                 return hit[1]
         result = self.shell.run(command, timeout=timeout)
-        fetch = Fetch(command=command, raw=result.output, error=result.error)
+        fetch = Fetch(
+            command=command,
+            raw=result.output,
+            error=result.error,
+            transcript=result.transcript,
+        )
         self._cache[command] = (time.time(), fetch)
         return fetch
+
+    def _first_answer(self, commands: Sequence[str], parser, *, cache: float = 0.0) -> Fetch:
+        """Try each command in turn until one actually answers.
+
+        Command names drift across firmware trains -- ``show system-information``
+        is ``show system`` on some builds -- and a wrong guess costs one round
+        trip, while a wrong assumption costs a blank panel.
+        """
+        first: Fetch | None = None
+        for command in commands:
+            fetch = self._parsed(command, parser, cache=cache)
+            if first is None:
+                first = fetch
+            if fetch.raw.strip() and not fetch.error:
+                return fetch
+        return first  # type: ignore[return-value]
 
     def _parsed(self, command: str, parser, *, cache: float = 0.0, timeout: float = 40.0) -> Fetch:
         fetch = self.show(command, cache=cache, timeout=timeout)
@@ -153,9 +183,20 @@ class ProCurveDevice:
             fetch.error = f"Parser failed ({exc}). Raw output is still available."
         return fetch
 
+    #: Spellings of the general status page. K/W.15 answers the first; other
+    #: trains only accept the shorter forms.
+    SYSTEM_INFO_COMMANDS = (
+        "show system-information",
+        "show system information",
+        "show system",
+    )
+
+    def _system_info(self, *, cache: float) -> Fetch:
+        return self._first_answer(self.SYSTEM_INFO_COMMANDS, parse_system_info, cache=cache)
+
     def probe(self) -> Capabilities:
         """Work out what this unit can do, so the UI hides what it cannot."""
-        sysinfo = self._parsed("show system-information", parse_system_info, cache=30)
+        sysinfo = self._system_info(cache=30)
         ports = self._parsed("show interfaces brief", parse_ports, cache=30)
         caps = Capabilities()
         caps.port_count = len(ports.data or [])
@@ -180,7 +221,7 @@ class ProCurveDevice:
     # -- read side ----------------------------------------------------------
 
     def system(self) -> dict[str, Any]:
-        info = self._parsed("show system-information", parse_system_info, cache=5)
+        info = self._system_info(cache=5)
         version = self.show("show version", cache=300)
         flash = self._parsed("show flash", parse_flash, cache=60)
         uptime_seconds = _uptime_seconds(version.raw + "\n" + info.raw)

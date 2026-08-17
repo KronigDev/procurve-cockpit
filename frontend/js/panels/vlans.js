@@ -15,7 +15,7 @@ export default {
   id: 'vlans',
   title: 'VLANs',
   icon: '⧉',
-  group: 'Konfiguration',
+  group: 'Configuration',
 
   async render(root, ctx) {
     const [{ data: vlanData }, { data: portData }, { data: routing }] = await Promise.all([
@@ -30,9 +30,9 @@ export default {
 
     root.appendChild(h('div.page-head', null,
       h('h2', { text: 'VLANs' }),
-      h('p', { text: `${vlans.length} VLANs konfiguriert` }),
+      h('p', { text: `${vlans.length} VLANs configured` }),
       h('span.spacer'),
-      h('button.btn.btn-primary', { text: '+ VLAN anlegen', onclick: () => createDialog(refresh) }),
+      h('button.btn.btn-primary', { text: '+ Create VLAN', onclick: () => createDialog(refresh) }),
     ));
 
     // ── overview table ────────────────────────────────────────────────
@@ -43,7 +43,7 @@ export default {
       return { ...v, untaggedPorts: untagged, taggedPorts: tagged, ipRow: ip };
     });
 
-    root.appendChild(card('Konfigurierte VLANs', vlanData.source?.command, [
+    root.appendChild(card('Configured VLANs', vlanData.source?.command, [
       table([
         {
           key: 'id',
@@ -60,7 +60,7 @@ export default {
         { key: 'name', label: 'Name' },
         {
           key: 'role',
-          label: 'Rolle',
+          label: 'Role',
           render: (v) => h('span', null,
             v.primary ? badge('primary', 'info') : null,
             v.is_mgmt ? badge('management', 'violet') : null,
@@ -86,13 +86,13 @@ export default {
           mono: true,
           render: (v) => v.taggedPorts.join(',') || '',
         },
-        { key: 'jumbo', label: 'Jumbo', render: (v) => (v.jumbo ? 'ja' : '') },
-        { key: 'voice', label: 'Voice', render: (v) => (v.voice ? 'ja' : '') },
+        { key: 'jumbo', label: 'Jumbo', render: (v) => (v.jumbo ? 'yes' : '') },
+        { key: 'voice', label: 'Voice', render: (v) => (v.voice ? 'yes' : '') },
         {
           key: 'edit',
           label: '',
           render: (v) => h('button.btn.btn-sm', {
-            text: 'Bearbeiten',
+            text: 'Edit',
             onclick: (ev) => { ev.stopPropagation(); editDialog(v, refresh); },
           }),
         },
@@ -121,51 +121,91 @@ export default {
     };
 
     const drawMatrix = () => {
-      const head = h('tr', null,
-        h('th.corner', { text: 'Port' }),
-        ...vlans.map((v) => h('th.vh', null, h('div', { text: `${v.id} · ${v.name}` }))),
+      const heads = vlans.map((vlan) => h('th.vh', {
+        title: `VLAN ${vlan.id} — ${vlan.name} (click to edit)`,
+        onclick: () => editDialog(vlan, refresh),
+      },
+        h('div.vh-name', { text: vlan.name || `VLAN ${vlan.id}` }),
+        h('div.vh-id', null,
+          h('i', { style: { background: vlanColor(vlan.id) } }),
+          String(vlan.id)),
+      ));
+
+      const table_ = h('table.matrix', null,
+        h('thead', null, h('tr', null, h('th.corner', { text: 'Port' }), ...heads)),
+        h('tbody'),
       );
-      const body = h('tbody');
-      for (const port of ports) {
-        const tr = h('tr', null, h('th.ph', { text: port.port }));
-        for (const vlan of vlans) {
+      const body = table_.querySelector('tbody');
+
+      ports.forEach((port, rowIndex) => {
+        const tr = h(`tr${(rowIndex + 1) % 4 === 0 ? '.band' : ''}`, null,
+          h('th.ph', null,
+            h('span.ph-id', { text: port.port }),
+            port.name ? h('span.ph-name', { text: port.name, title: port.name }) : null,
+          ),
+        );
+        vlans.forEach((vlan, colIndex) => {
           const key = `${port.port}|${vlan.id}`;
           const value = stateOf(port.port, vlan.id);
-          const cell = h('td', {
+          tr.appendChild(h('td', {
             class: `${value}${pending.has(key) ? ' changed' : ''}`.trim(),
             text: value ? value.toUpperCase() : '·',
-            title: `Port ${port.port} / VLAN ${vlan.id} — Klick: untagged → tagged → keine`,
+            dataset: { col: String(colIndex) },
+            title: `Port ${port.port} / VLAN ${vlan.id} · ${vlan.name}\nclick: untagged → tagged → none`,
             onclick: () => {
               const next = { '': 'u', u: 't', t: '', f: '' }[stateOf(port.port, vlan.id)];
               const original = current.get(key) || '';
               if (next === original) pending.delete(key); else pending.set(key, next);
               drawMatrix();
             },
-          });
-          tr.appendChild(cell);
-        }
+          }));
+        });
         body.appendChild(tr);
-      }
-      matrixHost.replaceChildren(h('table.matrix', null, h('thead', null, head), body));
+      });
+
+      // Cross hair. A cell alone is ambiguous once the table is wider than the
+      // screen -- you cannot tell which column you are actually in.
+      let hotCol = -1;
+      const clearHot = () => {
+        for (const el of table_.querySelectorAll('.hot')) el.classList.remove('hot');
+        hotCol = -1;
+      };
+      table_.addEventListener('mouseover', (ev) => {
+        const cell = ev.target.closest('td');
+        if (!cell) return;
+        const col = Number(cell.dataset.col);
+        const row = cell.parentElement;
+        if (row.classList.contains('hot') && col === hotCol) return;
+        clearHot();
+        hotCol = col;
+        row.classList.add('hot');
+        heads[col]?.classList.add('hot');
+        for (const other of table_.querySelectorAll(`td[data-col="${col}"]`)) {
+          other.classList.add('hot');
+        }
+      });
+      table_.addEventListener('mouseleave', clearHot);
+
+      matrixHost.replaceChildren(table_);
 
       applyBar.replaceChildren(
         h('span.muted', {
           text: pending.size
-            ? `${pending.size} Änderung(en) vorgemerkt`
-            : 'Zellen anklicken, um Zuordnungen zu ändern.',
+            ? `${pending.size} change(s) staged`
+            : 'Click a cell to change a membership.',
         }),
         h('span.spacer'),
         h('button.btn.btn-sm', {
-          text: 'Verwerfen',
+          text: 'Discard',
           disabled: !pending.size,
           onclick: () => { pending.clear(); drawMatrix(); },
         }),
         h('button.btn.btn-primary.btn-sm', {
-          text: 'Änderungen anwenden',
+          text: 'Review changes',
           disabled: !pending.size,
           onclick: () => {
             const lines = matrixCommands(current, pending);
-            if (!lines.length) { toast('Keine Änderungen.', 'info'); return; }
+            if (!lines.length) { toast('Nothing changed.', 'info'); return; }
             propose('raw', { lines }).then((ok) => { if (ok) { pending.clear(); refresh(); } });
           },
         }),
@@ -173,8 +213,15 @@ export default {
     };
     drawMatrix();
 
-    root.appendChild(card('Zuordnungsmatrix', 'U = untagged · T = tagged',
-      [applyBar, matrixHost], null, false));
+    const legend = h('div.matrix-legend', null,
+      h('span', null, h('b.l-u', { text: 'U' }), 'untagged (access)'),
+      h('span', null, h('b.l-t', { text: 'T' }), 'tagged (trunk)'),
+      h('span', null, h('b.l-n', { text: '·' }), 'not a member'),
+      h('span.dim', { text: 'Click a cell to cycle · → U → T → ·   ·   click a VLAN header to edit it' }),
+    );
+
+    root.appendChild(card('Membership matrix', `${ports.length} ports × ${vlans.length} VLANs`,
+      [applyBar, matrixHost, legend], null, false));
   },
 };
 
@@ -183,7 +230,7 @@ export default {
  * all its adds and removes together.
  */
 function matrixCommands(current, changes) {
-  const perVlan = new Map(); // vid -> {untag:[], tag:[], noUntag:[], noTag:[]}
+  const perVlan = new Map(); // vid -> {untag:[], tag:[], remove:[]}
   const bucket = (vid) => {
     if (!perVlan.has(vid)) perVlan.set(vid, { untag: [], tag: [], remove: [] });
     return perVlan.get(vid);
@@ -196,7 +243,6 @@ function matrixCommands(current, changes) {
     if (next === before) continue;
     if (next === 'u') bucket(vid).untag.push(port);
     else if (next === 't') bucket(vid).tag.push(port);
-    else if (next === 'f') bucket(vid).remove.push(port); // handled as plain removal
     else bucket(vid).remove.push(port);
   }
 
@@ -222,24 +268,24 @@ function matrixCommands(current, changes) {
 
 function createDialog(refresh) {
   const idInput = input({ type: 'number', min: 2, max: 4094, placeholder: '20' });
-  const nameInput = input({ placeholder: 'z. B. Gaeste' });
-  const ipInput = input({ placeholder: '192.168.20.1/24 oder leer' });
-  const jumbo = checkbox('Jumbo Frames', false);
+  const nameInput = input({ placeholder: 'e.g. Guests' });
+  const ipInput = input({ placeholder: '192.168.20.1/24 or empty' });
+  const jumbo = checkbox('Jumbo frames', false);
   const voice = checkbox('Voice VLAN', false);
 
   const body = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
-    field('VLAN-ID', idInput),
+    field('VLAN ID', idInput),
     field('Name', nameInput),
-    field('IP-Adresse', ipInput, '(optional, CIDR)'),
+    field('IP address', ipInput, '(optional, CIDR)'),
     jumbo.el, voice.el,
   );
 
   import('../ui.js').then(({ openModal, closeModal }) => {
-    openModal('VLAN anlegen', body, [
+    openModal('Create VLAN', body, [
       h('span.spacer'),
-      h('button.btn.btn-ghost', { text: 'Abbrechen', onclick: closeModal }),
+      h('button.btn.btn-ghost', { text: 'Cancel', onclick: closeModal }),
       h('button.btn.btn-primary', {
-        text: 'Weiter',
+        text: 'Continue',
         onclick: () => {
           closeModal();
           propose('vlan.create', {
@@ -257,41 +303,44 @@ function createDialog(refresh) {
 
 function editDialog(vlan, refresh) {
   const nameInput = input({ value: vlan.name || '' });
-  const ipMode = select([['keep', 'unverändert'], ['static', 'statische IP'], ['dhcp', 'DHCP/BootP'], ['none', 'keine IP']]);
+  const ipMode = select([
+    ['keep', 'leave unchanged'], ['static', 'static IP'],
+    ['dhcp', 'DHCP / BootP'], ['none', 'no IP'],
+  ]);
   const ipInput = input({ placeholder: '192.168.10.1/24' });
-  const jumbo = checkbox('Jumbo Frames', vlan.jumbo);
+  const jumbo = checkbox('Jumbo frames', vlan.jumbo);
   const voice = checkbox('Voice VLAN', vlan.voice);
-  const helperInput = input({ placeholder: 'DHCP-Relay-Ziel, z. B. 10.0.0.5' });
+  const helperInput = input({ placeholder: 'DHCP relay target, e.g. 10.0.0.5' });
 
   const body = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
     h('div.chip', { text: `VLAN ${vlan.id}` }),
     field('Name', nameInput),
-    field('IP-Konfiguration', ipMode),
-    field('IP-Adresse', ipInput, '(nur bei statisch)'),
-    field('IP Helper-Address', helperInput, '(DHCP-Relay)'),
+    field('IP configuration', ipMode),
+    field('IP address', ipInput, '(static only)'),
+    field('IP helper address', helperInput, '(DHCP relay)'),
     jumbo.el, voice.el,
     h('div.form-actions', null,
       h('button.btn.btn-sm', {
-        text: 'Als Primary-VLAN setzen',
+        text: 'Make primary VLAN',
         onclick: () => propose('vlan.role', { id: vlan.id, role: 'primary' }).then((ok) => ok && refresh()),
       }),
       h('button.btn.btn-sm', {
-        text: 'Als Management-VLAN setzen',
+        text: 'Make management VLAN',
         onclick: () => propose('vlan.role', { id: vlan.id, role: 'management' }).then((ok) => ok && refresh()),
       }),
     ),
   );
 
   import('../ui.js').then(({ openModal, closeModal }) => {
-    openModal(`VLAN ${vlan.id} bearbeiten`, body, [
+    openModal(`Edit VLAN ${vlan.id}`, body, [
       h('button.btn.btn-danger', {
-        text: 'VLAN löschen',
+        text: 'Delete VLAN',
         onclick: () => { closeModal(); propose('vlan.delete', { id: vlan.id }).then((ok) => ok && refresh()); },
       }),
       h('span.spacer'),
-      h('button.btn.btn-ghost', { text: 'Abbrechen', onclick: closeModal }),
+      h('button.btn.btn-ghost', { text: 'Cancel', onclick: closeModal }),
       h('button.btn.btn-primary', {
-        text: 'Weiter',
+        text: 'Continue',
         onclick: () => {
           const payload = { id: vlan.id };
           if (nameInput.value !== vlan.name) payload.name = nameInput.value;

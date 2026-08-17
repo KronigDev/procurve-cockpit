@@ -6,7 +6,7 @@ import { bytesToMb, card, formatUptime, h, kv, rawBlock, stat, table } from '../
 
 export default {
   id: 'dashboard',
-  title: 'Übersicht',
+  title: 'Overview',
   icon: '▤',
   group: 'Status',
 
@@ -33,13 +33,13 @@ export default {
 
     root.appendChild(h('div.grid.cols-4', null,
       stat('Ports up', `${up} / ${list.length}`,
-        disabled ? `${disabled} deaktiviert` : 'keine deaktiviert',
+        disabled ? `${disabled} disabled` : 'none disabled',
         up ? 'ok' : ''),
       stat('Uptime', formatUptime(sys.uptime_seconds) || info.uptime || '—', info.uptime || ''),
-      stat('CPU', Number.isFinite(cpu) ? `${cpu} %` : (info.cpu || '—'), 'Auslastung',
+      stat('CPU', Number.isFinite(cpu) ? `${cpu} %` : (info.cpu || '—'), 'utilisation',
         cpu > 80 ? 'danger' : cpu > 50 ? 'warn' : 'ok'),
-      stat('Speicher', memUsedPct !== null ? `${memUsedPct} %` : '—',
-        memTotal ? `${Math.round(memTotal)} MB gesamt` : '',
+      stat('Memory', memUsedPct !== null ? `${memUsedPct} %` : '—',
+        memTotal ? `${Math.round(memTotal)} MB total` : '',
         memUsedPct > 85 ? 'warn' : ''),
     ));
 
@@ -51,60 +51,60 @@ export default {
       onToggle: () => ctx.goto('ports'),
     }));
     fp.appendChild(legend('status'));
-    root.appendChild(card('Frontblende', 'Klick öffnet die Port-Verwaltung', fp));
+    root.appendChild(card('Front panel', 'click opens port management', fp));
 
     root.appendChild(h('div.grid.cols-2', null,
       card('System', sys.info.command, [
         kv([
           ['Name', info.name],
-          ['Modell', sys.capabilities?.model],
+          ['Model', sys.capabilities?.model],
           ['Firmware', info.software],
           ['ROM', info.rom],
-          ['Seriennummer', info.serial],
-          ['Basis-MAC', info.base_mac],
-          ['Standort', info.location],
-          ['Kontakt', info.contact],
-          ['MAC-Age-Time', info.mac_age ? `${info.mac_age} s` : ''],
-          ['Zeitzone', info.time_zone],
+          ['Serial number', info.serial],
+          ['Base MAC', info.base_mac],
+          ['Location', info.location],
+          ['Contact', info.contact],
+          ['MAC age time', info.mac_age ? `${info.mac_age} s` : ''],
+          ['Time zone', info.time_zone],
         ]),
         rawBlock(sys.info),
         rawBlock(sys.version),
       ]),
-      card('Fähigkeiten', 'automatisch erkannt', [
+      card('Capabilities', 'auto-detected', [
         kv([
-          ['Ports erkannt', sys.capabilities?.port_count],
-          ['PoE', sys.capabilities?.poe ? 'ja' : 'nein'],
-          ['IP-Routing verfügbar', sys.capabilities?.routing ? 'ja' : 'nein'],
-          ['LLDP', sys.capabilities?.lldp ? 'ja' : 'nein'],
-          ['Stacking', sys.capabilities?.stacking ? 'ja' : 'nein'],
+          ['Ports detected', sys.capabilities?.port_count],
+          ['PoE', sys.capabilities?.poe ? 'yes' : 'no'],
+          ['IP routing available', sys.capabilities?.routing ? 'yes' : 'no'],
+          ['LLDP', sys.capabilities?.lldp ? 'yes' : 'no'],
+          ['Stacking', sys.capabilities?.stacking ? 'yes' : 'no'],
         ]),
         (sys.capabilities?.modules || []).length
           ? table(
               [
                 { key: 'slot', label: 'Slot' },
-                { key: 'description', label: 'Modul' },
+                { key: 'description', label: 'Module' },
                 { key: 'serial', label: 'Serial', mono: true },
                 { key: 'status', label: 'Status' },
               ],
               sys.capabilities.modules,
             )
-          : h('p.note', { text: 'Keine Erweiterungsmodule gemeldet.' }),
-        rawBlock(sys.flash, 'Rohausgabe: show flash'),
+          : h('p.note', { text: 'No expansion modules reported.' }),
+        rawBlock(sys.flash, 'Raw output: show flash'),
       ]),
     ));
 
     // Log is slow on these boxes — load it after the page is already usable.
-    const logCard = card('Letzte Ereignisse', 'show logging -r', h('div.loading', null,
-      h('div.spinner'), h('span', { text: 'Lade Log …' })));
+    const logCard = card('Recent events', 'show logging -r', h('div.loading', null,
+      h('div.spinner'), h('span', { text: 'Loading log …' })));
     root.appendChild(logCard);
     api.data('logging').then(({ data }) => {
       const body = logCard.querySelector('.card-body');
       body.replaceChildren(h('pre.raw', {
-        text: (data.log?.raw || '(leer)').split('\n').slice(0, 200).join('\n'),
+        text: (data.log?.raw || '(empty)').split('\n').slice(0, 200).join('\n'),
       }));
     }).catch((err) => {
       logCard.querySelector('.card-body').replaceChildren(
-        h('p.note', { text: `Log konnte nicht geladen werden: ${err.message}` }));
+        h('p.note', { text: `Could not load the log: ${err.message}` }));
     });
   },
 };
