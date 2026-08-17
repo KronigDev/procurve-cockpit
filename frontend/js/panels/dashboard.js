@@ -2,7 +2,9 @@
 
 import { api, state } from '../api.js';
 import { faceplate, legend } from '../faceplate.js';
-import { badge, bytesToMb, card, formatUptime, h, kv, rawBlock, stat, table } from '../ui.js';
+import {
+  badge, bytesToMb, card, formatUptime, h, kv, rawBlock, stat, structured, table,
+} from '../ui.js';
 import { sevBadge } from './events.js';
 
 export default {
@@ -138,6 +140,20 @@ export default {
       ),
       rawBlock(sys.flash),
     ]));
+
+    // ── environment sensors ─────────────────────────────────────────────
+    // Only models that actually answer these commands get the cards.
+    const env = sys.environment || {};
+    const envCards = [
+      ['Temperature', env.temperature],
+      ['Fans', env.fans],
+      ['Power supply', env.power],
+    ].filter(([, f]) => f && !f.error && (f.raw || '').trim());
+    if (envCards.length) {
+      root.appendChild(h('div.grid.cols-3', null,
+        envCards.map(([title, fetch]) => card(title, fetch.command, structured(fetch))),
+      ));
+    }
 
     // Log is slow on these boxes — load it after the page is already usable.
     const logCard = card('Recent events', 'show logging -r', h('div.loading', null,

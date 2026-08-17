@@ -293,12 +293,21 @@ class ProCurveDevice:
         info_payload = info.as_dict()
         info_payload["data"] = data or None
 
+        # Environment sensors -- not every model has them; a rejected command
+        # is cached like any other fetch and the UI simply hides the card.
+        environment = {
+            "temperature": self._structured("show system temperature", cache=60, timeout=15).as_dict(),
+            "fans": self._structured("show system fans", cache=60, timeout=15).as_dict(),
+            "power": self._structured("show system power-supply", cache=60, timeout=15).as_dict(),
+        }
+
         return {
             "info": info_payload,
             "version": version.as_dict(),
             "flash": flash.as_dict(),
             "uptime_seconds": uptime_seconds,
             "resources": resources,
+            "environment": environment,
             "capabilities": self.caps.__dict__,
             "prompt": self.shell.state.prompt,
             "host": self.host,
