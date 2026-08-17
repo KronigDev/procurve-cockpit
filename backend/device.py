@@ -40,6 +40,7 @@ from .parsers import (
     parse_stp_port_config,
     parse_structured,
     parse_system_info,
+    parse_uptime,
     parse_trunks,
     parse_version,
     parse_vlan_ports,
@@ -177,14 +178,20 @@ class ProCurveDevice:
         is ``show system`` on some builds -- and a wrong guess costs one round
         trip, while a wrong assumption costs a blank panel.
         """
-        first: Fetch | None = None
+        attempts: list[Fetch] = []
         for command in commands:
             fetch = self._parsed(command, parser, cache=cache)
-            if first is None:
-                first = fetch
+            attempts.append(fetch)
             if fetch.raw.strip() and not fetch.error:
                 return fetch
-        return first  # type: ignore[return-value]
+        first = attempts[0]
+        # Nothing answered. Report what EVERY spelling said -- showing only
+        # the first rejection hides which variant this train actually wants.
+        if len(attempts) > 1:
+            first.error = " · ".join(
+                f"{f.command}: {f.error or '(no output)'}" for f in attempts
+            )
+        return first
 
     def _parsed(self, command: str, parser, *, cache: float = 0.0, timeout: float = 40.0) -> Fetch:
         shared = self.show(command, cache=cache, timeout=timeout)
@@ -260,18 +267,27 @@ class ProCurveDevice:
 
         # Not every train answers the status page at all ("Invalid input:
         # system-information"), and some that do omit CPU or memory.  `show
-        # cpu` and `show memory` exist everywhere, so fill the gaps from them
-        # -- the dashboard's resource tiles must not depend on one command.
+        # cpu`, `show memory` and `show uptime` fill the gaps -- and their
+        # fetches are surfaced in the payload, so when a train prints yet
+        # another format, the dashboard shows the raw output to fix from.
         data = dict(info.data or {})
+        resources: dict[str, Any] = {}
         if not data.get("cpu"):
             cpu = self._parsed("show cpu", parse_cpu, cache=5, timeout=20)
+            resources["cpu"] = cpu.as_dict()
             if cpu.data:
                 data["cpu"] = cpu.data
         if not (data.get("mem_total") and data.get("mem_free")):
             mem = self._parsed("show memory", parse_memory, cache=15, timeout=20)
+            resources["memory"] = mem.as_dict()
             if mem.data and mem.data.get("total"):
                 data["mem_total"] = data.get("mem_total") or mem.data["total"]
                 data["mem_free"] = data.get("mem_free") or mem.data["free"]
+        if uptime_seconds is None:
+            up = self._parsed("show uptime", parse_uptime, cache=5, timeout=15)
+            resources["uptime"] = up.as_dict()
+            if up.data is not None:
+                uptime_seconds = up.data
         info_payload = info.as_dict()
         info_payload["data"] = data or None
 
@@ -280,6 +296,7 @@ class ProCurveDevice:
             "version": version.as_dict(),
             "flash": flash.as_dict(),
             "uptime_seconds": uptime_seconds,
+            "resources": resources,
             "capabilities": self.caps.__dict__,
             "prompt": self.shell.state.prompt,
             "host": self.host,

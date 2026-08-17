@@ -35,6 +35,15 @@ const system = {
       ['middle-europe-and-portugal', 'Middle Europe / Portugal'], ['alaska', 'Alaska'],
       ['southern-hemisphere', 'Southern hemisphere'], ['user-defined', 'user defined'],
     ]);
+    const syncSel = select([
+      ['', 'unchanged'], ['sntp', 'SNTP'], ['timep', 'TIMEP'],
+      ['timep-or-sntp', 'TIMEP or SNTP'], ['none', 'none (no timesync)'],
+    ]);
+    const sntpModeSel = select([
+      ['', 'unchanged'], ['unicast', 'unicast (poll the servers below)'],
+      ['broadcast', 'broadcast (listen passively)'], ['disabled', 'disabled (no sntp)'],
+    ]);
+    const pollInput = input({ type: 'number', min: 30, max: 720, placeholder: '30–720, default 720' });
     const sntpInput = input({ placeholder: '10.0.0.1, pool.ntp.org' });
 
     root.appendChild(h('div.grid.cols-2', null,
@@ -62,7 +71,10 @@ const system = {
         h('pre.raw', { text: logs.time.raw || '' , style: { maxHeight: '110px' } }),
         field('Time zone', tzInput, '(offset in minutes, CET = 60)'),
         field('Daylight saving rule', dstSel),
-        field('SNTP servers', sntpInput, '(comma separated)'),
+        field('Time sync protocol', syncSel, '(timesync — SNTP is the modern choice)'),
+        field('SNTP mode', sntpModeSel),
+        field('SNTP poll interval', pollInput, '(seconds)'),
+        field('SNTP servers', sntpInput, '(comma separated — setting servers also enables SNTP unicast)'),
         h('div.form-actions', null,
           h('button.btn.btn-primary', {
             text: 'Apply time settings',
@@ -70,6 +82,9 @@ const system = {
               const payload = {};
               if (tzInput.value !== '') payload.timezone = Number(tzInput.value);
               if (dstSel.value) payload.daylight_rule = dstSel.value;
+              if (syncSel.value) payload.time_sync = syncSel.value;
+              if (sntpModeSel.value) payload.sntp_mode = sntpModeSel.value;
+              if (pollInput.value !== '') payload.sntp_poll = Number(pollInput.value);
               const servers = sntpInput.value.split(',').map((s) => s.trim()).filter(Boolean);
               if (servers.length) payload.sntp_servers = servers;
               if (!Object.keys(payload).length) { toast('Nothing changed.', 'info'); return; }

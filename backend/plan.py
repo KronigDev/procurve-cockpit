@@ -421,6 +421,21 @@ def build_system(p: dict) -> Plan:
         cmds.append(f"time timezone {int(p['timezone'])}")
     if p.get("daylight_rule"):
         cmds.append(f"time daylight-time-rule {p['daylight_rule']}")
+    if p.get("time_sync"):
+        sync = p["time_sync"]
+        if sync not in ("sntp", "timep", "timep-or-sntp", "none"):
+            raise PlanError("Time sync must be sntp, timep, timep-or-sntp or none.")
+        cmds.append("no timesync" if sync == "none" else f"timesync {sync}")
+    if p.get("sntp_mode"):
+        mode = p["sntp_mode"]
+        if mode not in ("unicast", "broadcast", "disabled"):
+            raise PlanError("SNTP mode must be unicast, broadcast or disabled.")
+        cmds.append("no sntp" if mode == "disabled" else f"sntp {mode}")
+    if p.get("sntp_poll") is not None:
+        poll = int(p["sntp_poll"])
+        if not 30 <= poll <= 720:
+            raise PlanError("SNTP poll interval is 30-720 seconds.")
+        cmds.append(f"sntp poll-interval {poll}")
     if p.get("sntp_servers"):
         cmds.append("timesync sntp")
         cmds.append("sntp unicast")

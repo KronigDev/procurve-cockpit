@@ -810,7 +810,9 @@ def parse_memory(text: str) -> dict[str, str]:
 
     Total and Free must come from the same block -- pairing them independently
     would marry a params-block Total to a system-block Free.  The system block
-    always comes last, so the last complete pair wins.
+    always comes last, so the last complete pair wins.  Some trains print a
+    columnar layout instead ("Total Bytes  Free Bytes  Lowest Free"); that is
+    the fallback.
     """
     total = free = ""
     block_total = ""
@@ -822,7 +824,38 @@ def parse_memory(text: str) -> dict[str, str]:
         if m and block_total:
             total, free = block_total, m.group(1)
             block_total = ""
+    if not total:
+        for row in find_table(text, "Total", "Free"):
+            t = _get(row, "Total Bytes", "Total")
+            f = _get(row, "Free Bytes", "Free")
+            if t and f:
+                total, free = t, f
     return {"total": total.replace(",", ""), "free": free.replace(",", "")}
+
+
+def parse_uptime(text: str) -> int | None:
+    """``show uptime`` -> seconds.
+
+    Two formats exist: ``4:07:33:16`` (days:hours:minutes:seconds) and the
+    wordy ``44 days, 2 hours, 51 minutes``.
+    """
+    m = re.search(r"\b(\d+):(\d{1,2}):(\d{1,2}):(\d{1,2})\b", text)
+    if m:
+        days, hours, minutes, seconds = (int(g) for g in m.groups())
+        return days * 86400 + hours * 3600 + minutes * 60 + seconds
+    total = 0
+    found = False
+    for pattern, factor in (
+        (r"(\d+)\s*days?", 86400),
+        (r"(\d+)\s*hours?", 3600),
+        (r"(\d+)\s*min", 60),
+        (r"(\d+)\s*sec", 1),
+    ):
+        m = re.search(pattern, text, re.I)
+        if m:
+            total += int(m.group(1)) * factor
+            found = True
+    return total if found else None
 
 
 def find_table(text: str, *required: str) -> list[dict[str, str]]:

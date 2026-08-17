@@ -70,6 +70,11 @@ export default {
         ]),
         rawBlock(sys.info),
         rawBlock(sys.version),
+        // Resource fallbacks (only fetched when the status page lacks them) —
+        // their raw output is the first thing to look at when a tile is empty.
+        sys.resources?.cpu ? rawBlock(sys.resources.cpu) : null,
+        sys.resources?.memory ? rawBlock(sys.resources.memory) : null,
+        sys.resources?.uptime ? rawBlock(sys.resources.uptime) : null,
       ]),
       card('Capabilities', 'auto-detected', [
         kv([

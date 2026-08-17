@@ -902,6 +902,43 @@ def _t_resources():
     # K-train label style.
     mem = P.parse_memory(" Total Bytes : 190,102,272\n Free Bytes : 121,867,776\n Lowest Free : 121,241,600\n")
     assert mem == {"total": "190102272", "free": "121867776"}, mem
+    # Columnar layout (headers over a dash-separated table).
+    mem = P.parse_memory(
+        " Status and Counters - System Memory Information\n\n"
+        "  Total Bytes   Free Bytes   Lowest Free\n"
+        "  ------------- ------------ ------------\n"
+        "  118,464,512   86,970,368   82,970,368\n"
+    )
+    assert mem == {"total": "118464512", "free": "86970368"}, mem
+
+
+@check("show uptime in both formats")
+def _t_uptime():
+    assert P.parse_uptime("  4:07:33:16  ") == 4 * 86400 + 7 * 3600 + 33 * 60 + 16
+    assert P.parse_uptime(" 44 days, 2 hours, 51 minutes ") == 44 * 86400 + 2 * 3600 + 51 * 60
+    assert P.parse_uptime("no uptime here") is None
+
+
+@check("plan: SNTP / timesync settings")
+def _t_plan_sntp():
+    p = plan.build("system.set", {"time_sync": "sntp", "sntp_mode": "unicast", "sntp_poll": 120})
+    assert p.commands == ["timesync sntp", "sntp unicast", "sntp poll-interval 120"], p.commands
+
+    p = plan.build("system.set", {"time_sync": "none", "sntp_mode": "disabled"})
+    assert p.commands == ["no timesync", "no sntp"], p.commands
+
+    for bad in (
+        {"time_sync": "ntpd"},
+        {"sntp_mode": "anycast"},
+        {"sntp_poll": 10},
+        {"sntp_poll": 9999},
+    ):
+        try:
+            plan.build("system.set", bad)
+        except plan.PlanError:
+            pass
+        else:
+            raise AssertionError(f"accepted {bad}")
 
 
 class FakeChannel:
