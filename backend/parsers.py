@@ -49,12 +49,36 @@ def _slice(line: str, span: tuple[int, int]) -> str:
     return line[span[0] : span[1]].strip().strip("|+").strip()
 
 
+_HEADER_BOUNDARY = " |+"
+
+
+def _cuts_words(line: str, cuts: list[int]) -> bool:
+    """True when slicing at *cuts* would split a word in *line*.
+
+    That is the signature of a section title sitting directly above the
+    header row ("System Air Temperature") -- slicing it produced column names
+    like "System Ai" / "r Tempera" / "ture".  Real header text stays inside
+    its column, so the cut positions land on whitespace.
+    """
+    for cut in cuts:
+        if (
+            0 < cut < len(line)
+            and line[cut - 1] not in _HEADER_BOUNDARY
+            and line[cut] not in _HEADER_BOUNDARY
+        ):
+            return True
+    return False
+
+
 def _headers(lines: list[str], dash_idx: int, spans: list[tuple[int, int]]) -> list[str]:
     """Join up to three stacked header lines per column."""
     header_lines: list[str] = []
+    cuts = [span[0] for span in spans[1:]]
     for i in range(dash_idx - 1, max(-1, dash_idx - 4), -1):
         line = lines[i]
         if not line.strip() or _is_dash_line(line):
+            break
+        if _cuts_words(line, cuts):
             break
         header_lines.insert(0, line)
     names: list[str] = []

@@ -255,11 +255,22 @@ export function structured(fetchObj) {
   if (kvPairs.length) wrap.appendChild(kv(kvPairs));
   for (const t of tables) wrap.appendChild(filterableTable(t.headers, t.rows || []));
   if (!kvPairs.length && !tables.length && !fetchObj.error) {
-    // Nothing structured in there — one-line answers show as they are.
     const text = (fetchObj.raw || '').trim();
-    wrap.appendChild(text
-      ? h('pre.raw', { text })
-      : empty('The switch returned nothing.'));
+    if (!text) {
+      wrap.appendChild(empty('The switch returned nothing.'));
+    } else {
+      const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+      if (lines.length <= 5) {
+        // Short answers become status tiles, never console text.
+        wrap.appendChild(h('div.facts', null, lines.map((lineText) => h('div.fact', null,
+          /^(enabled|disabled|yes|no|on|off|active|inactive)[.!]?$/i.test(lineText)
+            ? badge(lineText, /^(enab|yes|on|act)/i.test(lineText) ? 'ok' : 'mute')
+            : h('div.value', { text: lineText }),
+        ))));
+      } else {
+        wrap.appendChild(h('pre.raw', { text }));
+      }
+    }
   }
   wrap.appendChild(rawBlock(fetchObj));
   return wrap;

@@ -30,10 +30,13 @@ export function faceplate(ports, opts = {}) {
     for (const port of bank.ports) {
       rows.appendChild(portTile(port, selected, colorBy, opts));
     }
-    wrap.appendChild(h('div.fp-bank', null,
+    const bankEl = h('div.fp-bank', null,
       h('div.fp-bank-label', { text: bank.label }),
       rows,
-    ));
+    );
+    // Banks share the full card width in proportion to their port count.
+    bankEl.style.flexGrow = String(Math.max(1, bank.ports.length));
+    wrap.appendChild(bankEl);
   }
   return wrap;
 }

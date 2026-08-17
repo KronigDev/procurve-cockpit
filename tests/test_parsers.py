@@ -876,6 +876,24 @@ def _t_structured():
     assert data["kv"].get("Privilege") == "Manager", data["kv"]
 
 
+@check("a section title directly above the header row never becomes a header")
+def _t_title_above_headers():
+    text = (
+        " System Air Temperature\n"
+        "  Temp Sensor    Current Temp   Max Temp   Min Temp   Threshold   OverTemp\n"
+        "  -------------- -------------- ---------- ---------- ----------- ---------\n"
+        "  Sys-1          45C            47C        26C        60C         NO\n"
+    )
+    data = P.parse_structured(text)
+    t = data["tables"][0]
+    # Without the guard the title got sliced into 'System Ai' / 'r Tempera' /
+    # 'ture' fragments glued onto every column name.
+    assert t["headers"] == [
+        "Temp Sensor", "Current Temp", "Max Temp", "Min Temp", "Threshold", "OverTemp",
+    ], t["headers"]
+    assert t["rows"][0]["Current Temp"] == "45C", t["rows"]
+
+
 @check("stacked label-over-value output (show sntp on W.15)")
 def _t_stacked_kv():
     text = (

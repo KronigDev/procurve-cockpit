@@ -557,7 +557,10 @@ class ProCurveDevice:
             "tcp_push": f("show tcp-push-preserve", cache=60).as_dict(),
             "encrypt_credentials": f("show encrypt-credentials", cache=60).as_dict(),
             "include_credentials": f("show include-credentials", cache=60).as_dict(),
-            "banner": f("show banner", cache=60).as_dict(),
+            # W.15 wants the subcommand ("Incomplete input: banner" otherwise).
+            "banner": self._first_answer(
+                ("show banner motd", "show banner"), parse_structured, cache=60
+            ).as_dict(),
             "autorun": f("show autorun", cache=60).as_dict(),
             "control_plane": f("show control-plane-protection", cache=120).as_dict(),
         }
