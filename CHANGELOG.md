@@ -7,6 +7,26 @@ the versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed (field testing on the 2910al)
+
+- **Table titles no longer corrupt column headers.** A section title
+  directly above a header row (“System Air Temperature”) was sliced into
+  word fragments and glued onto every column name (“System Ai”,
+  “r Tempera”, “ture”). The header stacker now stops at any line whose
+  column cuts would split a word.
+- **The faceplate uses the full card width** on the dashboard and the
+  Ports panel: port tiles scale up with the available space, banks share
+  the width in proportion to their port count.
+- **Short command outputs render as status tiles** (with
+  enabled/disabled badges) instead of console text; `show banner` uses
+  the `motd` subcommand W.15 demands.
+- **The frontend can no longer be served stale**: `/` and `/static` are
+  delivered with `Cache-Control: no-cache`, so browsers revalidate on
+  every load instead of silently reusing old JS/CSS from memory cache
+  after an update.
+- **The login form starts empty** — the user name shows “manager” only
+  as a placeholder hint, nothing is prefilled.
+
 ### Added (interactive console)
 
 - **The web CLI is now genuinely interactive.** When the switch pauses at
