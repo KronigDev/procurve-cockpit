@@ -5,6 +5,42 @@ All notable changes to ProCurve Cockpit are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 the versioning follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **`show snmp-server` was parsed as one giant community table.** A table used
+  to survive a blank line if the next line was indented — but the sections that
+  follow the community table (`Trap Receivers`, `Traps Category`, the trap list)
+  are indented too, so all of them got sliced into the community columns, each
+  with its own “Remove” button. A blank line now ends a table, full stop.
+- **LLDP detail was always empty.** ProVision has no `detail` keyword on
+  `show lldp info remote-device`; the long form is reached by naming a port. It
+  is now fetched per port, but only for ports that actually reported a
+  neighbour.
+
+### Added
+
+- **MAC lookup.** In *MAC & ARP* you can paste a MAC in any notation
+  (`aa:bb:cc:dd:ee:ff`, `aabbcc-ddeeff`, `aabb.ccdd.eeff`, bare hex) or an IP
+  address and get the port it is on. Partial input works too. When the MAC is
+  not in the table, the answer says why that happens rather than just “nothing
+  found”.
+- **MAC addresses per port.** The port list has a MAC count column, and the
+  inspector shows a searchable list of the MACs behind the selected port(s),
+  each with its VLAN and — where ARP knows one — its IP.
+- The port search now also matches MAC addresses, so pasting a MAC into the
+  port filter narrows the list to the port it hangs on.
+- CDP neighbours are rendered as a table instead of raw console output.
+- SNMP trap receivers and trap categories are rendered as tables; an empty
+  receiver list says outright that nobody is being notified.
+
+### Changed
+
+- The port inspector shows only the enable/disable button that would actually
+  change something. With a mixed selection both appear, each labelled with how
+  many ports it affects.
+
 ## [1.1.0] — 2026-08-17
 
 First run against real hardware, and the language of the whole project switched

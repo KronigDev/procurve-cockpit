@@ -427,6 +427,32 @@ table.matrix td:hover {
   box-shadow: inset 0 0 0 1px var(--accent-dim);
 }
 
+/* ── MAC list inside the port inspector ────────────────────────────── */
+
+.mac-list { max-height: 260px; overflow: auto; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }
+.mac-row {
+  display: flex; align-items: center; gap: 9px; padding: 5px 9px; font-size: 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.mac-row:last-child { border-bottom: none; }
+.mac-row:hover { background: var(--panel-2); }
+.mac-row .mono { font-size: 12px; }
+.mac-list .note { margin: 8px 10px; }
+
+/* A single, prominent answer to "where does this MAC hang?" */
+.lookup-hit {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 12px 14px; border-radius: var(--radius-sm);
+  background: rgba(34,211,238,.09); border: 1px solid var(--accent-dim);
+}
+.lookup-hit .big {
+  font-family: var(--mono); font-size: 22px; font-weight: 700; color: var(--accent);
+}
+.lookup-miss {
+  padding: 12px 14px; border-radius: var(--radius-sm); font-size: 12.5px;
+  background: rgba(248,113,113,.08); border: 1px solid rgba(248,113,113,.3); color: #fecaca;
+}
+
 .matrix-legend {
   display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
   font-size: 11.5px; color: var(--fg-dim); margin: 10px 2px 0;

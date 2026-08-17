@@ -4,7 +4,7 @@
 import { api } from '../api.js';
 import { propose } from '../changes.js';
 import {
-  card, checkbox, field, h, input, rawBlock, rawCard, select, table, toast,
+  badge, card, checkbox, field, h, input, rawBlock, rawCard, select, table, toast,
 } from '../ui.js';
 
 const access = {
@@ -103,11 +103,16 @@ const snmp = {
   async render(root, ctx) {
     const { data } = await api.data('security');
     const refresh = () => ctx.reload();
-    const communities = data.snmp.data || [];
+    const snmp = data.snmp.data || {};
+    const communities = snmp.communities || [];
+    const receivers = snmp.receivers || [];
+    const categories = snmp.categories || [];
 
     root.appendChild(h('div.page-head', null,
       h('h2', { text: 'SNMP' }),
-      h('p', { text: `${communities.length} community strings` }),
+      h('p', {
+        text: `${communities.length} community string(s) · ${receivers.length} trap receiver(s)`,
+      }),
     ));
 
     root.appendChild(card('Communities', data.snmp.command, [
@@ -123,9 +128,32 @@ const snmp = {
             onclick: () => propose('snmp.set', { remove_communities: [c.name] }).then((ok) => ok && refresh()),
           }),
         },
-      ], communities),
-      rawBlock(data.snmp),
+      ], communities, { emptyText: 'No community strings configured.' }),
     ], null, true));
+
+    root.appendChild(h('div.grid.cols-2', null,
+      card('Trap receivers', snmp.link_change_ports
+        ? `link-change traps on: ${snmp.link_change_ports}` : null, [
+        table([
+          { key: 'address', label: 'Address', mono: true },
+          { key: 'community', label: 'Community', mono: true },
+          { key: 'events', label: 'Events' },
+          { key: 'type', label: 'Type' },
+        ], receivers, { emptyText: 'No trap receivers configured — nobody is being notified.' }),
+      ], null, true),
+      card('Trap categories', null, [
+        table([
+          { key: 'name', label: 'Category' },
+          {
+            key: 'status',
+            label: 'Status',
+            render: (c) => badge(c.status, /disabl|off/i.test(c.status) ? 'mute' : 'ok'),
+          },
+        ], categories, { emptyText: 'This firmware reports no trap categories.' }),
+      ], null, true),
+    ));
+
+    root.appendChild(card(null, null, [rawBlock(data.snmp)]));
 
     const nameInput = input({ placeholder: 'e.g. monitoring' });
     const accessSel = select([['operator', 'operator (read)'], ['manager', 'manager (write)']]);

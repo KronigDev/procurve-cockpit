@@ -4,7 +4,7 @@
 import { api } from '../api.js';
 import { propose } from '../changes.js';
 import {
-  badge, card, field, h, input, rawBlock, rawCard, table, toast,
+  badge, card, field, h, input, kv, rawBlock, rawCard, table, toast,
 } from '../ui.js';
 
 const neighbors = {
@@ -16,10 +16,12 @@ const neighbors = {
   async render(root) {
     const { data } = await api.data('neighbors');
     const list = data.lldp.data || [];
+    const cdp = data.cdp.data || [];
+    const details = data.lldp_details || [];
 
     root.appendChild(h('div.page-head', null,
       h('h2', { text: 'Neighbouring devices' }),
-      h('p', { text: `${list.length} reported via LLDP` }),
+      h('p', { text: `${list.length} via LLDP · ${cdp.length} via CDP` }),
     ));
 
     root.appendChild(card('LLDP', data.lldp.command, [
@@ -33,8 +35,31 @@ const neighbors = {
       rawBlock(data.lldp),
     ], null, true));
 
-    root.appendChild(rawCard('LLDP detail', data.lldp_detail));
-    root.appendChild(rawCard('CDP', data.cdp));
+    // Detail is fetched per port — ProVision has no `detail` keyword on this
+    // command, which is why the old single-command view stayed empty.
+    for (const entry of details) {
+      const fields = entry.data || {};
+      const rows = Object.entries(fields);
+      root.appendChild(card(
+        `Port ${entry.port} — ${fields.SysName || fields['System Name'] || 'neighbour detail'}`,
+        entry.command,
+        [
+          rows.length ? kv(rows) : h('p.note', { text: 'The switch returned no detail for this port.' }),
+          rawBlock(entry),
+        ],
+      ));
+    }
+
+    root.appendChild(card('CDP', data.cdp.command, [
+      table([
+        { key: 'port', label: 'Local port', mono: true },
+        { key: 'device_id', label: 'Device id' },
+        { key: 'platform', label: 'Platform' },
+        { key: 'capability', label: 'Capability' },
+        { key: 'address', label: 'Address', mono: true },
+      ], cdp, { emptyText: 'No CDP neighbours reported (CDP is often disabled).' }),
+      rawBlock(data.cdp),
+    ], null, true));
   },
 };
 
@@ -71,6 +96,60 @@ const forwarding = {
       h('h2', { text: 'MAC & ARP tables' }),
       h('p', { text: `${macs.length} MAC entries · ${arps.length} ARP entries` }),
     ));
+
+    // ── "which port is this MAC on?" ─────────────────────────────────
+    // Accepts every notation a switch, a label or a vendor tool might print:
+    // aabbcc-ddeeff, aa:bb:cc:dd:ee:ff, aabb.ccdd.eeff, or bare hex.
+    const lookupInput = input({
+      type: 'search',
+      placeholder: 'aa:bb:cc:dd:ee:ff · aabbcc-ddeeff · 192.168.1.50',
+    });
+    const lookupResult = h('div');
+    const macByNorm = new Map(macs.map((m) => [normMac(m.mac), m]));
+    const doLookup = () => {
+      const query = lookupInput.value.trim();
+      if (!query) { lookupResult.replaceChildren(); return; }
+      const hex = normMac(query);
+      let entry = hex.length >= 6 ? macByNorm.get(hex) : null;
+      // An IP is just as good a question: resolve it through ARP first.
+      if (!entry) {
+        const viaArp = arps.find((a) => a.ip === query);
+        if (viaArp) entry = macByNorm.get(normMac(viaArp.mac));
+      }
+      if (!entry && hex.length >= 6) {
+        // Partial input: fall back to a prefix match, which is what you get
+        // when you read half a MAC off a sticker.
+        const hit = [...macByNorm.entries()].filter(([k]) => k.includes(hex));
+        if (hit.length === 1) [, entry] = hit[0];
+        else if (hit.length > 1) {
+          lookupResult.replaceChildren(h('p.note', {
+            text: `${hit.length} MACs contain “${query}”. Use the table below.`,
+          }));
+          return;
+        }
+      }
+      if (!entry) {
+        lookupResult.replaceChildren(h('div.lookup-miss', {
+          text: `Not in the forwarding table. The switch only knows a MAC while it is `
+              + `actively sending — a device that is off or behind another switch will not appear.`,
+        }));
+        return;
+      }
+      const ip = ipByMac.get(normMac(entry.mac));
+      lookupResult.replaceChildren(h('div.lookup-hit', null,
+        h('span.dim', { text: 'Port' }),
+        h('span.big', { text: entry.port }),
+        h('span.mono', { text: entry.mac }),
+        entry.vlan ? badge(`VLAN ${entry.vlan}`, 'info') : null,
+        ip ? h('span.mono', { text: ip }) : null,
+      ));
+    };
+    lookupInput.addEventListener('input', doLookup);
+
+    root.appendChild(card('Find a MAC address', 'which port is it on?', [
+      h('div.toolbar', null, lookupInput),
+      lookupResult,
+    ]));
 
     root.appendChild(card('MAC address table', data.mac.command, [
       h('div.toolbar', null, input({

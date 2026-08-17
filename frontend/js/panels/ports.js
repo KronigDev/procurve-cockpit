@@ -13,10 +13,15 @@ const lastClicked = { value: null };
 let colorBy = 'status';
 let filterText = '';
 
+/** Hex digits only, so every MAC notation compares equal. */
+export const normMac = (mac) => String(mac || '').toLowerCase().replace(/[^0-9a-f]/g, '');
+
 /**
  * Everything about a port that the search box should match, including the
  * shorthand the table prints: typing `U100` has to find the port whose
- * untagged VLAN is 100, even though the raw field just says `100`.
+ * untagged VLAN is 100, even though the raw field just says `100`. The MACs
+ * learned behind the port are in here too — pasting a MAC in any notation
+ * finds the port it hangs on.
  */
 function haystack(p) {
   return [
@@ -27,6 +32,7 @@ function haystack(p) {
     ...(p.tagged || []).map((v) => `t${v} tagged ${v} vlan${v}`),
     p.trunk?.group, p.lldp?.system_name, p.lldp?.chassis_id,
     p.config?.mode, p.lldp_admin, p.poe?.status,
+    ...(p.macs || []).flatMap((m) => [m.mac, normMac(m.mac), m.ip]),
   ].filter(Boolean).join(' ').toLowerCase();
 }
 
@@ -37,13 +43,31 @@ export default {
   group: 'Configuration',
 
   async render(root, ctx) {
-    const [{ data: portData }, { data: vlanData }] = await Promise.all([
+    const [{ data: portData }, { data: vlanData }, { data: fwd }] = await Promise.all([
       api.data('ports'),
       api.data('vlans'),
+      api.data('forwarding'),
     ]);
     const ports = portData.ports || [];
     const vlans = vlanData.vlans || [];
-    for (const p of ports) p._hay = haystack(p);
+
+    // Which MACs sit behind which port. `show mac-address` already lists the
+    // whole table, so this costs nothing extra beyond the one command, and the
+    // ARP table turns each MAC into an IP where one is known.
+    const ipByMac = new Map((fwd.arp.data || []).map((a) => [normMac(a.mac), a.ip]));
+    const macsByPort = new Map();
+    for (const entry of fwd.mac.data || []) {
+      if (!macsByPort.has(entry.port)) macsByPort.set(entry.port, []);
+      macsByPort.get(entry.port).push({
+        mac: entry.mac,
+        vlan: entry.vlan || '',
+        ip: ipByMac.get(normMac(entry.mac)) || '',
+      });
+    }
+    for (const p of ports) {
+      p.macs = macsByPort.get(p.port) || [];
+      p._hay = haystack(p);
+    }
 
     // Drop selections for ports that no longer exist (module pulled, etc.).
     for (const id of [...selected]) {
@@ -195,6 +219,14 @@ export default {
             p.untagged ? h('span.vlan-pill.untag', { text: `U${p.untagged}` }) : null,
             ...(p.tagged || []).map((v) => h('span.vlan-pill', { text: `T${v}` })),
           ),
+        },
+        {
+          key: 'macs',
+          label: 'MACs',
+          num: true,
+          render: (p) => p.macs.length
+            ? h('span', { title: p.macs.map((m) => m.mac).join('\n'), text: String(p.macs.length) })
+            : '',
         },
         { key: 'trunk', label: 'Trunk', render: (p) => p.trunk ? badge(p.trunk.group, 'violet') : '' },
         {
@@ -385,16 +417,53 @@ function buildInspector(chosen, vlans, allPorts, refresh) {
   }
 
   // -- quick enable/disable ------------------------------------------------
+  // Only the button that would change something. Offering "Enable" on a port
+  // that is already enabled invites a plan that does nothing.
+  const anyEnabled = chosen.some((p) => p.enabled !== false);
+  const anyDisabled = chosen.some((p) => p.enabled === false);
   nodes.push(h('div.form-actions', null,
-    h('button.btn.btn-sm', {
-      text: 'Enable',
+    anyDisabled ? h('button.btn.btn-sm', {
+      text: anyEnabled ? `Enable (${chosen.filter((p) => p.enabled === false).length} disabled)` : 'Enable',
       onclick: () => propose('port.settings', { ports: ids, enabled: true }).then((ok) => ok && refresh()),
-    }),
-    h('button.btn.btn-sm', {
-      text: 'Disable',
+    }) : null,
+    anyEnabled ? h('button.btn.btn-sm', {
+      text: anyDisabled ? `Disable (${chosen.filter((p) => p.enabled !== false).length} enabled)` : 'Disable',
       onclick: () => propose('port.settings', { ports: ids, enabled: false }).then((ok) => ok && refresh()),
-    }),
+    }) : null,
   ));
+
+  // -- MACs learned behind the selection ------------------------------------
+  const macs = chosen.flatMap((p) => (p.macs || []).map((m) => ({ ...m, port: p.port })));
+  if (macs.length) {
+    const macHost = h('div.mac-list');
+    const macSearch = input({
+      type: 'search',
+      placeholder: 'Filter MAC / IP …',
+      oninput: (ev) => drawMacs(ev.target.value.trim().toLowerCase()),
+    });
+    const drawMacs = (needle = '') => {
+      const hits = needle
+        ? macs.filter((m) => `${m.mac} ${normMac(m.mac)} ${m.ip} ${m.vlan}`.toLowerCase().includes(needle))
+        : macs;
+      macHost.replaceChildren(...hits.slice(0, 200).map((m) => h('div.mac-row', null,
+        h('span.mono', { text: m.mac }),
+        m.ip ? h('span.dim', { text: m.ip }) : null,
+        h('span.spacer'),
+        chosen.length > 1 ? h('span.dim', { text: `port ${m.port}` }) : null,
+        m.vlan ? badge(`V${m.vlan}`, 'mute') : null,
+      )));
+      if (!hits.length) macHost.replaceChildren(h('p.note', { text: 'No match.' }));
+      else if (hits.length > 200) macHost.appendChild(h('p.note', { text: `… ${hits.length - 200} more` }));
+    };
+    drawMacs();
+
+    nodes.push(h('hr', { style: { border: 'none', borderTop: '1px solid var(--line-soft)', margin: '4px 0' } }));
+    nodes.push(h('h4', {
+      text: `MAC addresses behind ${chosen.length === 1 ? `port ${ids[0]}` : 'the selection'} (${macs.length})`,
+      style: { fontSize: '12px', color: 'var(--fg-dim)' },
+    }));
+    nodes.push(macSearch, macHost);
+  }
 
   // -- name / speed / misc -------------------------------------------------
   const curName = common(chosen, (p) => p.name || '');

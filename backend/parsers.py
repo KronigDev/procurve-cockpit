@@ -91,13 +91,12 @@ def parse_table(text: str, start: int = 0) -> tuple[list[dict[str, str]], list[s
     while i < len(lines):
         line = lines[i]
         if not line.strip():
-            # A single blank line inside a table is rare but legal; stop on it
-            # unless the next line still looks like data for these columns.
-            nxt = lines[i + 1] if i + 1 < len(lines) else ""
-            if not nxt.strip() or _is_dash_line(nxt) or not nxt.startswith(" "):
-                break
-            i += 1
-            continue
+            # A blank line ends the table, full stop. Trying to be clever here
+            # ("the next line is indented, so it is probably still data") ate
+            # whole following sections: `show snmp-server` continues with
+            # " Trap Receivers" and its key/value block, all of which got
+            # sliced into the community table's columns.
+            break
         if _is_dash_line(line):
             break
         values = [_slice(line, span) for span in spans]
@@ -633,22 +632,124 @@ def parse_port_counters(text: str) -> dict[str, str]:
     return parse_kv(text)
 
 
+def find_table(text: str, *required: str) -> list[dict[str, str]]:
+    """The first table whose headers contain all of *required* (fuzzy match)."""
+    idx = 0
+    total = len(text.split("\n"))
+    while idx < total:
+        rows, headers, idx = parse_table(text, idx)
+        if not headers:
+            break
+        flat = " ".join(headers).lower().replace(" ", "")
+        if all(name.lower().replace(" ", "") in flat for name in required):
+            return rows
+        if not rows and idx >= total:
+            break
+    return []
+
+
 def parse_snmp_communities(text: str) -> list[dict[str, str]]:
-    """``show snmp-server``."""
+    """``show snmp-server`` -> the community table only."""
     out: list[dict[str, str]] = []
-    for table in parse_all_tables(text):
-        for row in table:
-            name = _get(row, "Community Name", "Community")
-            if not name:
-                continue
-            out.append(
-                {
-                    "name": name,
-                    "mib_view": _get(row, "MIB View"),
-                    "write_access": _get(row, "Write Access", "Write"),
-                }
-            )
+    for row in find_table(text, "Community"):
+        name = _get(row, "Community Name", "Community")
+        if not name:
+            continue
+        out.append(
+            {
+                "name": name,
+                "mib_view": _get(row, "MIB View"),
+                "write_access": _get(row, "Write Access", "Write"),
+            }
+        )
     return out
+
+
+#: Trap categories are printed as `Label : Status` under a separator drawn with
+#: underscores -- not the usual dashes, so the table parser never sees them.
+_TRAP_CAT_RE = re.compile(r"^\s{2,}(?P<name>[A-Za-z][\w .\-/]*?)\s*:\s*(?P<status>\S[^\n]*?)\s*$")
+
+
+def parse_snmp_server(text: str) -> dict[str, Any]:
+    """``show snmp-server`` in full: communities, trap targets, trap categories."""
+    receivers = []
+    for row in find_table(text, "Address", "Community"):
+        address = _get(row, "Address")
+        if not address:
+            continue
+        receivers.append(
+            {
+                "address": address,
+                "community": _get(row, "Community"),
+                "events": _get(row, "Events"),
+                "type": _get(row, "Type"),
+                "retry": _get(row, "Retry"),
+                "timeout": _get(row, "Timeout"),
+            }
+        )
+
+    categories: list[dict[str, str]] = []
+    lines = text.split("\n")
+    start = next(
+        (i for i, line in enumerate(lines) if "traps category" in line.lower()), None
+    )
+    if start is not None:
+        for line in lines[start + 1 :]:
+            # The next top-level section ends the block. Detected by indent, not
+            # by name: matching on words like "Snmp" would fire on the category
+            # line "SNMP Authentication : Extended" itself. Section headers sit
+            # at one space, content at two or more.
+            if line.strip() and not line.startswith("  "):
+                break
+            match = _TRAP_CAT_RE.match(line)
+            if match:
+                categories.append(
+                    {"name": match.group("name").strip(), "status": match.group("status").strip()}
+                )
+
+    link_change = ""
+    match = re.search(r"Link-Change Traps[^:\n]*:\s*(\S[^\n]*)", text, re.I)
+    if match:
+        link_change = match.group(1).strip()
+
+    return {
+        "communities": parse_snmp_communities(text),
+        "receivers": receivers,
+        "categories": categories,
+        "link_change_ports": link_change,
+    }
+
+
+def parse_cdp_neighbors(text: str) -> list[dict[str, str]]:
+    """``show cdp neighbors``."""
+    out: list[dict[str, str]] = []
+    for row in find_table(text, "Port"):
+        port = _get(row, "Port", "Local Port")
+        device = _get(row, "Device ID", "DeviceId", "Device")
+        if not port or not device:
+            continue
+        out.append(
+            {
+                "port": port,
+                "device_id": device,
+                "platform": _get(row, "Platform"),
+                "capability": _get(row, "Capability", "Capabilities"),
+                "address": _get(row, "Address"),
+            }
+        )
+    return out
+
+
+def parse_lldp_detail(text: str) -> dict[str, str]:
+    """``show lldp info remote-device <port>`` -> the detail block as key/value.
+
+    ProVision has no ``detail`` keyword on this command; the long form is
+    reached by naming a port, which is why this is parsed per port.
+    """
+    fields = parse_kv(text)
+    # Drop the banner line ("Information detail for port 5") -- it is a heading,
+    # not a property of the neighbour.
+    return {k: v for k, v in fields.items() if v and not k.lower().startswith("information")}
 
 
 def parse_config_text(text: str) -> list[str]:

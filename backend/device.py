@@ -17,8 +17,10 @@ from typing import Any, Sequence
 from .parsers import (
     diff_config,
     parse_arp,
+    parse_cdp_neighbors,
     parse_config_text,
     parse_flash,
+    parse_lldp_detail,
     parse_ip_config,
     parse_lacp,
     parse_lldp_config,
@@ -30,7 +32,7 @@ from .parsers import (
     parse_port_names,
     parse_ports,
     parse_routes,
-    parse_snmp_communities,
+    parse_snmp_server,
     parse_stp,
     parse_stp_port_config,
     parse_system_info,
@@ -342,12 +344,21 @@ class ProCurveDevice:
         }
 
     def neighbors(self) -> dict[str, Any]:
+        lldp = self._parsed("show lldp info remote-device", parse_lldp_neighbors, cache=5)
+        # ProVision has no `detail` keyword here -- the long form is reached by
+        # naming a port. Only ports that actually reported a neighbour are
+        # queried, so this is a handful of round trips, not one per port.
+        details = []
+        for entry in (lldp.data or [])[:24]:
+            port = entry["port"]
+            fetch = self._parsed(
+                f"show lldp info remote-device {port}", parse_lldp_detail, cache=30
+            )
+            details.append({"port": port, **fetch.as_dict()})
         return {
-            "lldp": self._parsed(
-                "show lldp info remote-device", parse_lldp_neighbors, cache=5
-            ).as_dict(),
-            "lldp_detail": self.show("show lldp info remote-device detail", cache=30).as_dict(),
-            "cdp": self.show("show cdp neighbors", cache=30).as_dict(),
+            "lldp": lldp.as_dict(),
+            "lldp_details": details,
+            "cdp": self._parsed("show cdp neighbors", parse_cdp_neighbors, cache=30).as_dict(),
         }
 
     def forwarding(self) -> dict[str, Any]:
@@ -381,7 +392,7 @@ class ProCurveDevice:
             "dhcp_snooping": self.show("show dhcp-snooping", cache=15).as_dict(),
             "arp_protect": self.show("show arp-protect", cache=30).as_dict(),
             "8021x": self.show("show port-access authenticator", cache=30).as_dict(),
-            "snmp": self._parsed("show snmp-server", parse_snmp_communities, cache=30).as_dict(),
+            "snmp": self._parsed("show snmp-server", parse_snmp_server, cache=30).as_dict(),
             "ssh": self.show("show ip ssh", cache=30).as_dict(),
             "telnet": self.show("show telnet", cache=30).as_dict(),
             "web": self.show("show web-management", cache=30).as_dict(),

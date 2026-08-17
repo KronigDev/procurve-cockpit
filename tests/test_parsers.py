@@ -186,6 +186,76 @@ POE_BRIEF = """
   3      No        Off       usage   0 W      0 W                  Disabled
 """
 
+# Verbatim from a 2910al. The community table is followed by further sections
+# whose lines are indented too -- the table parser used to keep going and slice
+# "Trap Receivers", "Traps Category" and every trap line into its columns.
+SNMP_SERVER = """
+SNMP Communities
+
+  Community Name                   MIB View Write Access
+  -------------------------------- -------- ------------
+  public                           Manager  Unrestricted
+
+ Trap Receivers
+
+  Link-Change Traps Enabled on Ports [All] : All
+
+  Traps Category                  Current Status
+  _____________________________   __________________
+  SNMP Authentication           : Extended
+  Password change               : Enabled
+  Login failures                : Enabled
+  Port-Security                 : Enabled
+  Authorization Server Contact  : Enabled
+  DHCP-Snooping                 : Enabled
+  Dynamic ARP Protection        : Enabled
+  Dynamic IP Lockdown           : Enabled
+
+
+  MAC address table changes     : Disabled
+  MAC Address Count             : Disabled
+
+  Address                Community              Events   Type   Retry   Timeout
+  ---------------------- ---------------------- -------- ------ ------- -------
+
+
+ Excluded MIBs
+
+
+ Snmp Response Pdu Source-IP Information
+
+  Selection Policy   : rfc1517
+
+ Trap Pdu Source-IP Information
+
+  Selection Policy   : rfc1517
+"""
+
+CDP_NEIGHBORS = """
+ CDP neighbors information
+
+  Port   Device ID                      | Platform             Capability
+  ------ ------------------------------ + -------------------- ----------
+  1      SEP001122334455                | Cisco IP Phone 7962  H
+  21     ap-flur                         | AIR-CAP2702I         T B
+"""
+
+LLDP_DETAIL = """
+ LLDP Remote Device Information Detail
+
+  Local Port   : 21
+  ChassisType  : mac-address
+  ChassisId    : aa bb cc dd ee ff
+  PortType     : local
+  PortId       : 3
+  SysName      : ap-flur
+  System Descr : Cisco AP Software
+  PortDescr    : GigabitEthernet0/3
+
+  System Capabilities Supported  : bridge, wlan-access-point
+  System Capabilities Enabled    : bridge, wlan-access-point
+"""
+
 RUNNING_CONFIG = """
 Running configuration:
 
@@ -216,6 +286,53 @@ def check(name):
         CHECKS.append((name, fn))
         return fn
     return wrap
+
+
+@check("show snmp-server stops at the end of the community table")
+def _t_snmp():
+    communities = P.parse_snmp_communities(SNMP_SERVER)
+    assert len(communities) == 1, communities
+    assert communities[0] == {
+        "name": "public", "mib_view": "Manager", "write_access": "Unrestricted",
+    }, communities[0]
+
+    full = P.parse_snmp_server(SNMP_SERVER)
+    assert full["link_change_ports"] == "All", full["link_change_ports"]
+    assert full["receivers"] == [], full["receivers"]
+
+    names = [c["name"] for c in full["categories"]]
+    assert "SNMP Authentication" in names, names
+    assert "Dynamic IP Lockdown" in names, names
+    assert "MAC Address Count" in names, names
+    status = {c["name"]: c["status"] for c in full["categories"]}
+    assert status["SNMP Authentication"] == "Extended"
+    assert status["MAC address table changes"] == "Disabled"
+    # The sections after the trap categories must not leak in as categories.
+    assert "Selection Policy" not in names, names
+
+
+@check("a blank line ends a table")
+def _t_table_stops_at_blank():
+    rows, _h, _i = P.parse_table(SNMP_SERVER)
+    assert len(rows) == 1, rows
+    assert rows[0]["Community Name"] == "public"
+
+
+@check("show cdp neighbors")
+def _t_cdp():
+    rows = P.parse_cdp_neighbors(CDP_NEIGHBORS)
+    assert len(rows) == 2, rows
+    assert rows[0]["device_id"] == "SEP001122334455"
+    assert rows[0]["platform"] == "Cisco IP Phone 7962"
+    assert rows[1]["port"] == "21"
+
+
+@check("show lldp info remote-device <port>")
+def _t_lldp_detail():
+    fields = P.parse_lldp_detail(LLDP_DETAIL)
+    assert fields.get("SysName") == "ap-flur", fields
+    assert fields.get("PortId") == "3", fields
+    assert fields.get("ChassisId") == "aa bb cc dd ee ff", fields
 
 
 @check("echo stripping keeps output that shares the echo's line")
