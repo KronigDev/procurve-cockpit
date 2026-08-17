@@ -15,7 +15,11 @@ import re
 from typing import Any, Iterable
 
 DASH_LINE_RE = re.compile(r"^[\s\-+|]*$")
-KV_RE = re.compile(r"(?P<k>[A-Za-z][A-Za-z0-9 _/%()#.\-]*?)\s*:\s*(?P<v>.*?)\s*(?=$)")
+# The key charset includes []: ProVision prints defaults in brackets on the
+# config-flavoured pages ("STP Enabled [No] : Yes"); the bracket part is
+# stripped from the key after matching.
+KV_RE = re.compile(r"(?P<k>[A-Za-z][A-Za-z0-9 _/%()#.\-\[\]]*?)\s*:\s*(?P<v>.*?)\s*(?=$)")
+_KV_DEFAULT_RE = re.compile(r"\s*\[[^\]]*\]\s*$")
 
 
 # --------------------------------------------------------------------------
@@ -78,7 +82,10 @@ def parse_table(text: str, start: int = 0) -> tuple[list[dict[str, str]], list[s
     lines = text.split("\n")
     dash_idx = -1
     for i in range(start, len(lines)):
-        if _is_dash_line(lines[i]):
+        # A real column separator has at least two dash runs; a single
+        # full-width run is just a divider between record blocks and must not
+        # spawn a one-column garbage table.
+        if _is_dash_line(lines[i]) and len(re.findall(r"-+", lines[i])) >= 2:
             dash_idx = i
             break
     if dash_idx == -1:
@@ -108,15 +115,22 @@ def parse_table(text: str, start: int = 0) -> tuple[list[dict[str, str]], list[s
 
 
 def parse_all_tables(text: str) -> list[list[dict[str, str]]]:
-    """Every dash-delimited table in *text*, in order."""
+    """Every dash-delimited table in *text*, in order.
+
+    An *empty* table (separator followed by a blank line -- "no entries" on
+    this switch) is skipped, not treated as the end: real output puts
+    populated tables after empty ones.
+    """
     tables: list[list[dict[str, str]]] = []
     idx = 0
     lines_total = len(text.split("\n"))
     while idx < lines_total:
-        rows, _headers_, idx = parse_table(text, idx)
-        if not rows:
+        rows, _headers_, next_idx = parse_table(text, idx)
+        if rows:
+            tables.append(rows)
+        if next_idx <= idx:
             break
-        tables.append(rows)
+        idx = next_idx
     return tables
 
 
@@ -140,6 +154,8 @@ def parse_kv(text: str) -> dict[str, str]:
             if not m:
                 continue
             key = re.sub(r"\s+", " ", m.group("k")).strip()
+            # Drop a trailing "[default]" -- the value carries the live state.
+            key = _KV_DEFAULT_RE.sub("", key)
             value = m.group("v").strip()
             if key and key not in result:
                 result[key] = value
@@ -149,7 +165,7 @@ def parse_kv(text: str) -> dict[str, str]:
 def _split_kv_chunks(line: str) -> list[str]:
     """Cut *line* before every ``<gap><key> :`` that starts a new pair."""
     cuts = [0]
-    for m in re.finditer(r"\s{2,}(?=[A-Za-z][A-Za-z0-9 _/%()#.\-]*?\s*:)", line):
+    for m in re.finditer(r"\s{2,}(?=[A-Za-z][A-Za-z0-9 _/%()#.\-\[\]]*?\s*:)", line):
         if m.start() > 0:
             cuts.append(m.end())
     cuts.append(len(line))
@@ -614,9 +630,115 @@ def parse_routes(text: str) -> list[dict[str, str]]:
     ]
 
 
-def parse_flash(text: str) -> dict[str, str]:
-    """``show flash``."""
-    return parse_kv(text)
+#: `Primary Image : 10475866 03/09/16 W.15.14.0012` -- size, date and version
+#: share the value column, which is why the generic key/value split cannot be
+#: used here.  Date and version are optional so an erased image still parses;
+#: the whitespace between fields is `[^\S\n]` (space/tab, never a newline) so
+#: an image row with empty columns cannot swallow the start of the next line.
+_FLASH_IMAGE_RE = re.compile(
+    r"^[^\S\n]*(?P<slot>Primary|Secondary)[^\S\n]+Image[^\S\n]*:?[^\S\n]*(?P<size>[\d,]+)"
+    r"(?:[^\S\n]+(?P<date>\d{1,2}/\d{1,2}/\d{2,4}))?"
+    r"(?:[^\S\n]+(?P<version>[A-Za-z][\w.]+))?",
+    re.I | re.M,
+)
+
+
+def parse_flash(text: str) -> dict[str, Any]:
+    """``show flash`` -> both images, boot ROM version and the default boot.
+
+    The spellings drift between trains (``Boot Rom Version`` / ``BootROM
+    Version``, ``Default Boot`` / ``Default Boot Image``), so the labels are
+    matched loosely.
+    """
+    images = []
+    for m in _FLASH_IMAGE_RE.finditer(text):
+        images.append(
+            {
+                "slot": m.group("slot").lower(),
+                "size_bytes": int(m.group("size").replace(",", "")),
+                "date": m.group("date") or "",
+                "version": m.group("version") or "",
+            }
+        )
+    rom = re.search(r"Boot\s*ROM\s*Version\s*:\s*(\S+)", text, re.I)
+    default = re.search(r"Default\s*Boot(?:\s*Image)?\s*:\s*([A-Za-z]+)", text, re.I)
+    return {
+        "images": images,
+        "boot_rom": rom.group(1) if rom else "",
+        "default_boot": default.group(1).lower() if default else "",
+        "fields": parse_kv(text),
+    }
+
+
+#: The software revision stands on a line of its own inside the image stamp
+#: block ("W.15.14.0012", "KB.16.03.0004", "U.11.62").  Factory-installed
+#: builds carry a lowercase suffix ("W.15.14.0012m"), printed verbatim.
+_SW_VERSION_RE = re.compile(
+    r"^\s*(?P<v>[A-Z]{1,3}\.\d{2}\.\d{2}(?:\.\d{1,4})?[a-z]?)\s*$", re.M
+)
+_BUILD_DATE_RE = re.compile(
+    r"^\s*(?P<d>[A-Z][a-z]{2}\s+\d{1,2}\s+\d{4}\s+\d{2}:\d{2}:\d{2})\s*$", re.M
+)
+
+
+def parse_version(text: str) -> dict[str, str]:
+    """``show version`` -> running revision and which flash image booted."""
+    version = _SW_VERSION_RE.search(text)
+    fallback = None
+    if not version:
+        # Some trains only say "... revision W.15.14.0012, ROM ..." in prose.
+        fallback = re.search(r"revision\s*:?\s+(?P<v>[A-Z]{1,3}\.\d[\w.]*)", text, re.I)
+    date = _BUILD_DATE_RE.search(text)
+    boot = re.search(r"Boot\s*Image\s*:\s*([A-Za-z]+)", text, re.I)
+    return {
+        "version": (version or fallback).group("v") if (version or fallback) else "",
+        "build_date": date.group("d") if date else "",
+        "boot_image": boot.group(1).lower() if boot else "",
+    }
+
+
+#: `I 08/17/26 12:34:56 00076 ports: port 1 is now on-line` -- older trains
+#: omit the five digit event code.
+_EVENT_RE = re.compile(
+    r"^\s*(?P<sev>[A-Z])\s+"
+    r"(?P<date>\d{2}/\d{2}/\d{2,4})\s+"
+    r"(?P<time>\d{2}:\d{2}:\d{2})\s+"
+    r"(?:(?P<code>\d{3,6}):?\s+)?"
+    r"(?P<module>[A-Za-z][\w.\-/]*)\s*:\s?"
+    r"(?P<msg>.*)$"
+)
+
+_EVENT_SEVERITIES = {"M": "major", "W": "warning", "I": "info", "D": "debug"}
+
+
+def parse_event_log(text: str) -> list[dict[str, str]]:
+    """``show logging`` -> one entry per event.
+
+    Wrapped continuation lines are folded into the entry above; the listing
+    banner and the ``---- Bottom of Log ----`` footer never match and drop out.
+    """
+    entries: list[dict[str, str]] = []
+    for raw in text.split("\n"):
+        line = raw.rstrip()
+        if not line.strip():
+            continue
+        m = _EVENT_RE.match(line)
+        if m:
+            sev = m.group("sev").upper()
+            entries.append(
+                {
+                    "severity": sev,
+                    "severity_name": _EVENT_SEVERITIES.get(sev, sev.lower()),
+                    "date": m.group("date"),
+                    "time": m.group("time"),
+                    "code": m.group("code") or "",
+                    "module": m.group("module"),
+                    "message": m.group("msg").strip(),
+                }
+            )
+        elif entries and line.startswith(" ") and "----" not in line:
+            entries[-1]["message"] += " " + line.strip()
+    return entries
 
 
 def parse_modules(text: str) -> list[dict[str, str]]:
@@ -641,6 +763,66 @@ def parse_modules(text: str) -> list[dict[str, str]]:
 def parse_port_counters(text: str) -> dict[str, str]:
     """``show interfaces <port>`` -- counters live in the KV preamble."""
     return parse_kv(text)
+
+
+def parse_structured(text: str) -> dict[str, Any]:
+    """Generic ``show`` output -> key/value pairs plus every table, in order.
+
+    The structure behind every command without a dedicated parser: the UI
+    renders the pairs as a definition list and each table as a filterable
+    table, instead of dumping console text at the user.
+    """
+    tables: list[dict[str, Any]] = []
+    total = len(text.split("\n"))
+    idx = 0
+    while idx < total:
+        rows, headers, next_idx = parse_table(text, idx)
+        # Skip empty tables ("no entries") instead of stopping -- populated
+        # tables legitimately follow them.
+        if rows:
+            tables.append({"headers": headers, "rows": rows})
+        if next_idx <= idx:
+            break
+        idx = next_idx
+    return {"kv": parse_kv(text), "tables": tables}
+
+
+_CPU_RE = re.compile(r"(\d+)\s*(?:percent|%)", re.I)
+#: Label style: "CPU Util (%) : 25" / "Total CPU Utilization (%) : 6".
+_CPU_LABEL_RE = re.compile(r"(?:cpu|utili[sz]ation)[^:\n]*:\s*(\d+)", re.I)
+
+
+def parse_cpu(text: str) -> str:
+    """``show cpu`` -> utilisation as a bare number string ("4")."""
+    m = _CPU_RE.search(text) or _CPU_LABEL_RE.search(text)
+    return m.group(1) if m else ""
+
+
+#: Line-scoped and with a bounded gap on purpose: a multi-line regex with
+#: open-ended whitespace eaters invited catastrophic backtracking on padded
+#: output.  The gap covers " Bytes : " and friends.
+_MEM_TOTAL_RE = re.compile(r"\bTotal[^\d\n]{0,24}([\d,]+)", re.I)
+_MEM_FREE_RE = re.compile(r"\bFree[^\d\n]{0,24}([\d,]+)", re.I)
+
+
+def parse_memory(text: str) -> dict[str, str]:
+    """``show memory`` -> total/free bytes of *system* memory.
+
+    Total and Free must come from the same block -- pairing them independently
+    would marry a params-block Total to a system-block Free.  The system block
+    always comes last, so the last complete pair wins.
+    """
+    total = free = ""
+    block_total = ""
+    for line in text.split("\n"):
+        m = _MEM_TOTAL_RE.search(line)
+        if m:
+            block_total = m.group(1)
+        m = _MEM_FREE_RE.search(line)
+        if m and block_total:
+            total, free = block_total, m.group(1)
+            block_total = ""
+    return {"total": total.replace(",", ""), "free": free.replace(",", "")}
 
 
 def find_table(text: str, *required: str) -> list[dict[str, str]]:

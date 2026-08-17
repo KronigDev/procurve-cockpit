@@ -213,6 +213,64 @@ export function rawCard(title, fetchObj) {
   ]);
 }
 
+/** A table built from generic {headers, rows} with its own filter box. */
+export function filterableTable(headers, rows) {
+  const columns = (headers || []).map((name) => ({ key: name, label: name }));
+  const host = h('div');
+  const draw = (needle) => {
+    const shown = needle
+      ? rows.filter((r) => Object.values(r).join(' ').toLowerCase().includes(needle))
+      : rows;
+    host.replaceChildren(table(columns, shown, { emptyText: 'No rows match the filter.' }));
+  };
+  draw('');
+  if ((rows || []).length <= 6) return host; // a filter over 6 rows is noise
+  return h('div', null,
+    h('div.toolbar', null,
+      input({
+        type: 'search',
+        placeholder: `Filter ${rows.length} rows …`,
+        oninput: (ev) => draw(ev.target.value.trim().toLowerCase()),
+      }),
+    ),
+    host,
+  );
+}
+
+/**
+ * Render the generic backend structure ({kv, tables}) as real elements —
+ * key/value list plus one filterable table per table found. The raw text only
+ * appears collapsed at the bottom, as the escape hatch it should be.
+ */
+export function structured(fetchObj) {
+  const wrap = h('div');
+  if (!fetchObj) return wrap;
+  if (fetchObj.error) {
+    wrap.appendChild(h('div.risk.warn', null,
+      h('b', { text: 'Switch:' }), h('span', { text: fetchObj.error })));
+  }
+  const data = fetchObj.data || {};
+  const kvPairs = Object.entries(data.kv || {});
+  const tables = data.tables || [];
+  if (kvPairs.length) wrap.appendChild(kv(kvPairs));
+  for (const t of tables) wrap.appendChild(filterableTable(t.headers, t.rows || []));
+  if (!kvPairs.length && !tables.length && !fetchObj.error) {
+    // Nothing structured in there — one-line answers show as they are.
+    const text = (fetchObj.raw || '').trim();
+    wrap.appendChild(text
+      ? h('pre.raw', { text })
+      : empty('The switch returned nothing.'));
+  }
+  wrap.appendChild(rawBlock(fetchObj));
+  return wrap;
+}
+
+/** Card wrapper for `structured` — the drop-in replacement for rawCard. */
+export function structCard(title, fetchObj) {
+  if (!fetchObj) return null;
+  return card(title, fetchObj.command, structured(fetchObj));
+}
+
 export function field(labelText, control, hint = '') {
   return h('label.field', null,
     h('span', null, labelText, hint ? h('em', { text: ` ${hint}` }) : null),

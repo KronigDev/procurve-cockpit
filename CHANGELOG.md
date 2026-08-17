@@ -7,6 +7,135 @@ the versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Stage → review → apply.** Config changes no longer go to the switch one
+  form at a time: they are staged locally (each still previewing its exact
+  CLI), the top bar shows “N pending changes”, and from there the whole set
+  is reviewed, applied in one batch (with or without `write memory`) or
+  discarded. The typed APPLY confirmation for dangerous commands moved to
+  that apply step. Exec-level operations (reboot, image copy, TFTP) keep
+  applying immediately behind their own confirmation.
+- **The Save button only exists while there is something to save**; before
+  the first applied change the top bar shows no save control at all.
+- **No more console dumps as primary UI.** Every command without a dedicated
+  parser now goes through a generic structure parser (key/value pairs plus
+  every table, derived from the dash separator lines) and renders as real
+  elements — definition lists and tables with a filter box on anything
+  longer than six rows. This covers port security, 802.1X, DHCP snooping,
+  ARP protect, RADIUS, TACACS+, authentication methods, SSH/telnet/web
+  status, all QoS views, ACL overview and assignments, RIP, DHCP helpers,
+  PoE system status, per-port STP and MST configuration, SNTP, debug
+  destinations, boot history and startup config files. The raw text remains
+  available, but only collapsed as a diagnostic fallback.
+- **System resources no longer depend on one command.** Where a train
+  rejects the status page (“Invalid input: system-information”) or omits
+  CPU/memory from it, the dashboard tiles now fill from `show cpu` and
+  `show memory` instead of staying empty.
+- Hardening from the adversarial review of this round:
+  - Staged changes are cleared on every session boundary and guarded
+    everywhere they could silently die: disconnect asks first, closing or
+    reloading the tab warns, and an exec-level reboot dialog points out that
+    staged changes are not applied yet. A batch staged on switch A can never
+    be applied to switch B.
+  - Each staged change is applied as its own context-clean batch, so a raw
+    block that forgets an `exit` cannot corrupt the changes staged after it;
+    applied changes leave the queue immediately, so a connection loss
+    mid-batch keeps only the un-applied remainder staged.
+  - The review modal re-renders risks and the typed-APPLY gate when a change
+    is removed, and the list itself renders correctly (a `replaceChildren`
+    array bug showed `[object HTMLDivElement]` instead of the changes).
+  - `Apply & save` and `write memory` now report “already saved” instead of
+    turning the unsaved badge on; global keyboard shortcuts pause while a
+    modal is open.
+  - Parser fixes surfaced by real outputs: `Label [default] : value` lines
+    (STP config, SNTP, 802.1X) now parse; single full-width dash dividers
+    (`show telnet` session blocks) no longer produce one-column garbage
+    tables; `show memory` pairs Total/Free per block instead of marrying
+    values from different blocks; `show cpu` also understands the
+    `CPU Util (%) : N` label style. Cached fetches are no longer mutated in
+    place, removing a cross-parser race on `show spanning-tree config`.
+  - The Access panel derives SSH/Telnet/web state from the structured pairs
+    instead of a substring test on raw text that was effectively always
+    “on”.
+  - A second verification pass caught fallout of those fixes: staging now
+    actually resolves as staged (a modal-close race made every staging look
+    like a cancel, leaving panel edit buffers primed for duplicate staging);
+    the review modal freezes while the batch is being sent (no mid-apply
+    Remove/double-apply), works on a snapshot of the queue, and puts the
+    un-applied remainder back if the connection dies mid-batch; result
+    dialogs now say what actually happened (“applied, but write memory
+    failed” instead of “0 of N commands rejected”); a batch with rejected
+    commands is never written to startup config, matching the backend rule;
+    a bare `write memory` no longer re-renders the page (which wiped
+    half-typed forms); a reboot clears the by-then unappliable staged set
+    instead of tripping the leave-page warning; empty tables (“no entries”)
+    no longer hide populated tables below them; and the memory parser lost
+    a catastrophic-backtracking regex (97 s on pathological input → 2.5 ms).
+
+### Added
+
+- **Firmware & boot panel.** `show flash` is now parsed for real — both
+  images with size/date/version, boot ROM version and the default boot —
+  instead of key/value-mangling the multi-column lines. The new panel under
+  *System → Firmware & boot* covers everything the switch can do here:
+  set the default boot image (`boot set-default flash`), boot from a specific
+  image (`boot system flash`), copy one image over the other
+  (`copy flash flash`), erase an image, update firmware over TFTP
+  (`copy tftp flash`), and reboot — now, in *N* minutes (`reload after`),
+  at a fixed time (`reload at`), plus cancelling the schedule.
+- **Exec-level plans.** Boot/reload/copy/erase live outside `configure
+  terminal`, so plans now carry an `exec_level` flag and `/api/apply` runs
+  them at manager level. A command that takes the switch down on purpose is
+  treated as a success when the session drops, with a dedicated “switch is
+  rebooting” dialog instead of a spurious error; on “Apply & save”,
+  `write memory` runs *before* the reboot command.
+- **Event log panel.** `show logging -r` is parsed into structured entries
+  (severity, date, time, event code, system, message — wrapped lines folded,
+  old trains without the code column handled). The new *Status → Event log*
+  page is a real table with full-text search, per-severity toggles with
+  counts, a system filter, row limits, download and an optional 30-second
+  auto-refresh that keeps the filters as they are.
+- **Overview upgrades.** The dashboard now shows a *Flash & boot* card
+  (images with running/default badges, boot ROM, build date) and renders
+  *Recent events* as a table with severity badges instead of raw text.
+- `show version` is parsed too: running revision, build date and which flash
+  image the switch actually booted from.
+- Risk analysis learned the difference between rebooting and not:
+  `boot set-default` and `reload cancel` no longer demand the typed APPLY
+  confirmation, while `erase flash` now does.
+- Hardening from an adversarial review of the above:
+  - The confirm detector now understands the `[y/n/^C]` form of ProVision's
+    “Do you want to save current configuration?” question, and answers it the
+    way the user chose (Apply = n, Apply & save = y — where the save already
+    ran anyway). Before, a reboot with unsaved changes wedged at that
+    question while the UI claimed the switch was rebooting.
+  - `run()` now waits out its full timeout instead of giving up after 20
+    seconds of silence — a `copy flash flash` or TFTP download no longer
+    reports success mid-copy and desynchronises the session.
+  - An SSH session ending is now reported as such (paramiko's EOF was
+    indistinguishable from silence before), which is also the reliable
+    “switch went down” signal for `reload`/`boot` on both transports —
+    and if the prompt comes back instead, the reboot is reported as
+    *rejected*, whatever the switch's wording.
+  - A failed `write memory` aborts an exec batch instead of rebooting on
+    top of the failure.
+  - Flash parsing survives an erased image (blank columns no longer swallow
+    the next line) and factory `m`-suffixed revisions parse.
+  - `reload at/…` now validates value ranges (no more `reload at 99:99`
+    reaching the switch) and all firmware inputs are ASCII-checked.
+  - Event-log panel: severity counts and the system dropdown update on
+    refresh, truncation is always labelled, a failed manual refresh shows
+    a toast.
+  - A second verification pass caught fallout of the first round: a typed
+    `reload` in the CLI console (and raw config lines) now answers the save
+    question with **n** instead of silently committing the running config —
+    rebooting to discard a bad change keeps working. An abortive close (TCP
+    RST mid-reboot) is treated like a clean EOF on both transports, a
+    switch's parting words before hanging up ("maximum number of sessions")
+    survive into the login error, and a batch aborted by a failed save no
+    longer triggers panel refreshes or the unsaved badge.
+
 ### Code quality
 
 CodeQL's quality suite reported 10 findings across 5 rules. All are addressed:

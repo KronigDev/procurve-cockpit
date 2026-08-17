@@ -4,7 +4,7 @@
 import { api } from '../api.js';
 import { propose } from '../changes.js';
 import {
-  badge, card, checkbox, field, h, input, rawBlock, rawCard, select, table, toast,
+  badge, card, checkbox, field, h, input, rawBlock, select, structCard, structured, table, toast,
 } from '../ui.js';
 
 const access = {
@@ -16,9 +16,19 @@ const access = {
   async render(root, ctx) {
     const { data } = await api.data('security');
     const refresh = () => ctx.reload();
-    const sshOn = /enabled/i.test(data.ssh.raw);
-    const telnetOn = !/disabled/i.test(data.telnet.raw);
-    const webOn = /enabled/i.test(data.web.raw);
+    // Read the structured pairs, not the raw text -- words like "Enabled"
+    // appear in headings and would make a substring test always true.
+    const protoState = (fetch, ...labelParts) => {
+      const pairs = Object.entries((fetch.data && fetch.data.kv) || {});
+      for (const part of labelParts) {
+        const hit = pairs.find(([k]) => k.toLowerCase().includes(part));
+        if (hit) return /yes|enab|^on$/i.test(hit[1]) ? 'on' : 'off';
+      }
+      return 'unknown';
+    };
+    const sshOn = protoState(data.ssh, 'ssh enabled', 'ip ssh');
+    const telnetOn = protoState(data.telnet, 'telnet-server', 'telnet enabled');
+    const webOn = protoState(data.web, 'web access', 'web management', 'web-management');
 
     root.appendChild(h('div.page-head', null,
       h('h2', { text: 'Access & accounts' }),
@@ -33,7 +43,7 @@ const access = {
     root.appendChild(h('div.grid.cols-2', null,
       card('Management protocols', null, [
         h('p.note', {
-          text: `Detected right now: SSH ${sshOn ? 'on' : 'off'} · Telnet ${telnetOn ? 'on' : 'off'} · web ${webOn ? 'on' : 'off'}`,
+          text: `Detected right now: SSH ${sshOn} · Telnet ${telnetOn} · web ${webOn}`,
         }),
         field('SSH', sshSel),
         field('Telnet', telnetSel),
@@ -53,7 +63,7 @@ const access = {
             },
           }),
         ),
-        rawBlock(data.ssh), rawBlock(data.telnet), rawBlock(data.web),
+        structured(data.ssh), structured(data.telnet), structured(data.web),
       ]),
       card('Passwords', null, [
         credentialForm('manager', refresh),
@@ -62,9 +72,9 @@ const access = {
       ]),
     ));
 
-    root.appendChild(rawCard('Authentication methods', data.authentication));
-    root.appendChild(rawCard('RADIUS', data.radius));
-    root.appendChild(rawCard('TACACS+', data.tacacs));
+    root.appendChild(structCard('Authentication methods', data.authentication));
+    root.appendChild(structCard('RADIUS', data.radius));
+    root.appendChild(structCard('TACACS+', data.tacacs));
   },
 };
 
@@ -278,10 +288,10 @@ const portSecurity = {
       ),
     ]));
 
-    root.appendChild(rawCard('Current state', data.port_security));
-    root.appendChild(rawCard('802.1X port access', data['8021x']));
-    root.appendChild(rawCard('DHCP snooping', data.dhcp_snooping));
-    root.appendChild(rawCard('ARP protect', data.arp_protect));
+    root.appendChild(structCard('Current state', data.port_security));
+    root.appendChild(structCard('802.1X port access', data['8021x']));
+    root.appendChild(structCard('DHCP snooping', data.dhcp_snooping));
+    root.appendChild(structCard('ARP protect', data.arp_protect));
   },
 };
 

@@ -124,6 +124,9 @@ class ApplyRequest(BaseModel):
     commands: list[str]
     save: bool = False
     confirm_danger: bool = False
+    #: True runs the commands at manager exec level (boot, reload, copy, erase)
+    #: instead of entering configuration mode.
+    exec_level: bool = False
 
 
 class ExecRequest(BaseModel):
@@ -215,6 +218,7 @@ SECTIONS = {
     "qos": lambda d: d.qos(),
     "acls": lambda d: d.acls(),
     "logging": lambda d: d.logging(),
+    "firmware": lambda d: d.firmware(),
     "config": lambda d: d.config(),
 }
 
@@ -256,8 +260,18 @@ async def apply(
     session = get_session(x_session)
     if not req.commands:
         raise HTTPException(status_code=400, detail="No commands to apply.")
-    result = await in_thread(session.device.apply, req.commands, save=req.save)
-    session.note("apply", {"commands": req.commands, "ok": result["ok"], "save": req.save})
+    result = await in_thread(
+        session.device.apply, req.commands, save=req.save, exec_level=req.exec_level
+    )
+    session.note(
+        "apply",
+        {
+            "commands": req.commands,
+            "ok": result["ok"],
+            "save": req.save,
+            "exec": req.exec_level,
+        },
+    )
     return result
 
 

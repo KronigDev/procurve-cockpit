@@ -70,11 +70,37 @@ def _t_plan_risk():
     assert any(r["level"] == "danger" for r in body["risks"]), body
 
 
+@check("firmware plans are exec level and carry their risks")
+def _t_plan_firmware():
+    res = client.post("/api/plan", json={
+        "intent": "firmware.boot", "payload": {"image": "secondary"},
+    })
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["exec_level"] is True, body
+    assert body["commands"] == ["boot system flash secondary"], body
+    assert any(r["level"] == "danger" for r in body["risks"]), body
+
+    res = client.post("/api/plan", json={
+        "intent": "firmware.reload", "payload": {"mode": "cancel"},
+    })
+    body = res.json()
+    assert body["commands"] == ["reload cancel"], body
+    assert not any(r["level"] == "danger" for r in body["risks"]), body
+
+    res = client.post("/api/plan", json={
+        "intent": "firmware.boot", "payload": {"image": "tertiary"},
+    })
+    assert res.status_code == 400, res.status_code
+
+
 @check("switch routes require a session")
 def _t_auth_gate():
     for method, path, payload in [
         ("get", "/api/status", None),
         ("get", "/api/data/ports", None),
+        ("get", "/api/data/firmware", None),
+        ("post", "/api/apply", {"commands": ["boot"], "exec_level": True}),
         ("post", "/api/apply", {"commands": ["hostname \"x\""]}),
         ("post", "/api/exec", {"command": "show version"}),
         ("post", "/api/save", None),

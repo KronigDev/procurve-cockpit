@@ -2,7 +2,8 @@
 
 import { api, state } from '../api.js';
 import { faceplate, legend } from '../faceplate.js';
-import { bytesToMb, card, formatUptime, h, kv, rawBlock, stat, table } from '../ui.js';
+import { badge, bytesToMb, card, formatUptime, h, kv, rawBlock, stat, table } from '../ui.js';
+import { sevBadge } from './events.js';
 
 export default {
   id: 'dashboard',
@@ -89,9 +90,49 @@ export default {
               sys.capabilities.modules,
             )
           : h('p.note', { text: 'No expansion modules reported.' }),
-        rawBlock(sys.flash, 'Raw output: show flash'),
       ]),
     ));
+
+    // ── flash & boot ────────────────────────────────────────────────────
+    const flash = sys.flash.data || {};
+    const ver = sys.version.data || {};
+    const images = flash.images || [];
+    root.appendChild(card('Flash & boot', sys.flash.command, [
+      images.length
+        ? table([
+            {
+              key: 'slot', label: 'Image',
+              render: (r) => h('span', null,
+                h('b', { text: r.slot }), ' ',
+                r.slot === ver.boot_image ? badge('running', 'ok') : null, ' ',
+                r.slot === flash.default_boot ? badge('default boot', 'info') : null,
+              ),
+            },
+            { key: 'version', label: 'Version', mono: true },
+            { key: 'date', label: 'Date', mono: true },
+            {
+              key: 'size_bytes', label: 'Size', num: true,
+              render: (r) => {
+                const mbVal = bytesToMb(r.size_bytes);
+                return mbVal ? `${mbVal.toFixed(1)} MB` : '—';
+              },
+            },
+          ], images)
+        : h('p.note', { text: 'Could not parse the flash listing — raw output below.' }),
+      kv([
+        ['Boot ROM', flash.boot_rom],
+        ['Default boot', flash.default_boot],
+        ['Running image', ver.boot_image],
+        ['Build date', ver.build_date],
+      ]),
+      h('div.form-actions', null,
+        h('button.btn.btn-sm', {
+          text: 'Manage firmware & boot →',
+          onclick: () => ctx.goto('firmware'),
+        }),
+      ),
+      rawBlock(sys.flash),
+    ]));
 
     // Log is slow on these boxes — load it after the page is already usable.
     const logCard = card('Recent events', 'show logging -r', h('div.loading', null,
@@ -99,9 +140,28 @@ export default {
     root.appendChild(logCard);
     api.data('logging').then(({ data }) => {
       const body = logCard.querySelector('.card-body');
-      body.replaceChildren(h('pre.raw', {
-        text: (data.log?.raw || '(empty)').split('\n').slice(0, 200).join('\n'),
-      }));
+      const entries = (data.log?.data || []).slice(0, 15);
+      if (entries.length) {
+        body.replaceChildren(
+          table([
+            { key: 'severity', label: 'Sev', render: sevBadge },
+            { key: 'date', label: 'Date', mono: true },
+            { key: 'time', label: 'Time', mono: true },
+            { key: 'module', label: 'System', mono: true },
+            { key: 'message', label: 'Event' },
+          ], entries),
+          h('div.form-actions', null,
+            h('button.btn.btn-sm', {
+              text: 'Full event log with filters →',
+              onclick: () => ctx.goto('events'),
+            }),
+          ),
+        );
+      } else {
+        body.replaceChildren(h('pre.raw', {
+          text: (data.log?.raw || '(empty)').split('\n').slice(0, 200).join('\n'),
+        }));
+      }
     }).catch((err) => {
       logCard.querySelector('.card-body').replaceChildren(
         h('p.note', { text: `Could not load the log: ${err.message}` }));

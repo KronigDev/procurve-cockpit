@@ -3,7 +3,7 @@
 import { api } from '../api.js';
 import { propose } from '../changes.js';
 import {
-  card, field, h, input, kv, rawBlock, rawCard, select, toast,
+  card, field, h, input, kv, rawBlock, select, structCard, structured, toast,
 } from '../ui.js';
 
 const system = {
@@ -77,7 +77,7 @@ const system = {
             },
           }),
         ),
-        rawBlock(logs.sntp),
+        structured(logs.sntp),
       ]),
     ));
 
@@ -90,7 +90,7 @@ const system = {
 
 const logging = {
   id: 'logs',
-  title: 'Log & syslog',
+  title: 'Syslog & debug',
   icon: '☰',
   group: 'System',
 
@@ -99,34 +99,14 @@ const logging = {
     const refresh = () => ctx.reload();
 
     root.appendChild(h('div.page-head', null,
-      h('h2', { text: 'Event log' }),
-      h('p', { text: data.log.command }),
+      h('h2', { text: 'Syslog & debug' }),
+      h('p', { text: 'forwarding targets — the log itself lives under Status → Event log' }),
+      h('span.spacer'),
+      h('button.btn.btn-sm', {
+        text: 'Open event log →',
+        onclick: () => ctx.goto('events'),
+      }),
     ));
-
-    let needle = '';
-    const logHost = h('pre.raw', { style: { maxHeight: '52vh' } });
-    const lines = (data.log.raw || '').split('\n');
-    const drawLog = () => {
-      logHost.textContent = (needle
-        ? lines.filter((l) => l.toLowerCase().includes(needle))
-        : lines).join('\n') || '(no entries)';
-    };
-    drawLog();
-
-    root.appendChild(card('Log', `${lines.length} lines`, [
-      h('div.toolbar', null,
-        input({
-          type: 'search', placeholder: 'Filter …',
-          oninput: (ev) => { needle = ev.target.value.trim().toLowerCase(); drawLog(); },
-        }),
-        h('span.spacer'),
-        h('button.btn.btn-sm', {
-          text: 'Save to file',
-          onclick: () => downloadText('switch-log.txt', data.log.raw || ''),
-        }),
-      ),
-      logHost,
-    ]));
 
     const serverInput = input({ placeholder: '10.0.0.9' });
     const facilitySel = select([
@@ -164,7 +144,7 @@ const logging = {
       ),
     ]));
 
-    root.appendChild(rawCard('Debug destinations', data.debug));
+    root.appendChild(structCard('Debug destinations', data.debug));
   },
 };
 
@@ -223,11 +203,11 @@ const qos = {
       ]),
     ));
 
-    root.appendChild(rawCard('Queue configuration', data.queue));
-    root.appendChild(rawCard('Port priorities', data.port_priority));
-    root.appendChild(rawCard('DSCP mapping', data.dscp));
-    root.appendChild(rawCard('Device priority', data.device_priority));
-    root.appendChild(rawCard('Rate limits', data.rate_limit));
+    root.appendChild(structCard('Queue configuration', data.queue));
+    root.appendChild(structCard('Port priorities', data.port_priority));
+    root.appendChild(structCard('DSCP mapping', data.dscp));
+    root.appendChild(structCard('Device priority', data.device_priority));
+    root.appendChild(structCard('Rate limits', data.rate_limit));
   },
 };
 
@@ -273,11 +253,11 @@ const acls = {
         }),
       ),
       h('p.note', { text: 'ACL syntax is validated by the switch, not by this interface.' }),
+      rawBlock(data.config, 'Current ACL configuration (the editor source)'),
     ]));
 
-    root.appendChild(rawCard('ACL overview', data.list));
-    root.appendChild(rawCard('ACL configuration', data.config));
-    root.appendChild(rawCard('Assignment to ports / VLANs', data.ports));
+    root.appendChild(structCard('ACL overview', data.list));
+    root.appendChild(structCard('Assignment to ports / VLANs', data.ports));
   },
 };
 

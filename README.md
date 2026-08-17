@@ -44,11 +44,20 @@ Telnet is built in as a fallback for switches where `ip ssh` was never enabled.
 Since Python 3.13 removed `telnetlib`, `backend/transport.py` speaks the
 necessary parts of RFC 854 itself.
 
-## How it works: preview → apply
+## How it works: stage → review → apply
 
-No click reaches the switch unreviewed. Every action first produces **the exact
-CLI lines** that would be sent. Those are shown, together with a risk analysis,
-and only executed after confirmation.
+Nothing reaches the switch while you edit. Every config action first produces
+**the exact CLI lines** it would send and is then *staged* locally. The top bar
+shows how many changes are pending; from there you review the whole set
+(remove individual changes, see every command and risk), apply it to the
+switch (optionally followed by `write memory`), or discard it. The Save
+button only appears while there is an applied-but-unsaved change in this
+session.
+
+Exec-level operations (reboot, image copy, TFTP update) are the exception:
+they apply immediately after their own review dialog — batching a reboot with
+config edits would make no sense. Reboot-class commands (`reload`,
+`boot system flash`, `erase flash`) additionally require typing `APPLY`.
 
 Commands that can lock you out additionally require you to type `APPLY`. The
 analysis knows your management VLAN and the IP you are connected through, so it
@@ -62,7 +71,9 @@ removing ports from the management VLAN, `erase startup-config`, `reload`,
 
 | Area | What you get |
 |---|---|
-| **Overview** | Model, firmware, serial, uptime, CPU, memory, modules, log |
+| **Overview** | Model, firmware, serial, uptime, CPU, memory, modules, flash images & boot settings, recent events |
+| **Event log** | `show logging` as a real table: full-text search, severity toggles, system filter, auto-refresh, download |
+| **Firmware & boot** | Both flash images with version/size/date, running & default-boot badges, set default boot, boot from an image, copy/erase images, TFTP firmware update, reboot now/scheduled/cancel |
 | **Ports** | Front-panel view with multi-select (shift-click), name, enable/disable, speed/duplex, flow control, MDI, broadcast limit, LLDP mode, VLAN assignment, per-port STP. Every control opens on the value currently configured |
 | **VLANs** | Create/change/delete, IP (static/DHCP), jumbo, voice, DHCP relay, primary/management VLAN, **click matrix port × VLAN** |
 | **Trunks** | Create and dissolve LACP / static trunk / FEC, LACP status |

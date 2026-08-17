@@ -18,8 +18,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from backend import parsers as P  # noqa: E402
 from backend import plan  # noqa: E402
+from backend.device import ProCurveDevice  # noqa: E402
 from backend.transport import (  # noqa: E402
+    CONFIRM_RE,
     ProCurveShell,
+    TransportError,
     clean,
     detect_error,
     render_overwrites,
@@ -602,6 +605,376 @@ def _t_risk():
 def _t_plan_raw():
     p = plan.build("raw", {"lines": ["hostname \x27x\x27", "no ip ssh"]})
     assert any(r.level == "danger" for r in p.risks), p.risks
+
+
+# --------------------------------------------------------------------------
+# flash / version / event log
+# --------------------------------------------------------------------------
+
+FLASH_W15 = """
+ Image             Size(Bytes)    Date   Version
+ ----------------- -------------- ------ --------------
+ Primary Image     :   10475866   03/09/16 W.15.14.0012
+ Secondary Image   :   10352128   01/22/15 W.15.13.0009
+
+ Boot Rom Version: W.14.04
+ Default Boot    : Primary
+"""
+
+FLASH_K16 = """
+Image           Size (bytes) Date     Version
+--------------- ------------ -------- --------------
+Primary Image   :  15987030  03/24/17 KB.16.03.0004
+Secondary Image :  15987030  03/24/17 KB.16.03.0004
+BootROM Version : KB.16.01.0006
+Default Boot Image : Secondary
+"""
+
+VERSION_W15 = """
+Image stamp:    /ws/swbuildm/rel_venice_qaoff/code/build/anm(swbuildm_rel_venice_qaoff_rel_venice)
+                Mar  9 2016 14:35:37
+                W.15.14.0012
+                188
+Boot Image:     Secondary
+"""
+
+EVENT_LOG = """
+ Keys:   W=Warning   I=Information
+         M=Major     D=Debug
+---- Reverse event Log listing: Events Since Boot ----
+W 08/17/26 09:15:02 00331 FFI: port 5-Excessive CRC/alignment errors
+I 08/17/26 09:14:55 00076 ports: port 5 is now on-line
+M 08/16/26 23:01:11 00061 system: System went down without saving
+    crash data
+I 08/16/26 22:59:40 ports: port 2 is now off-line
+---- Bottom of Log : Events Listed = 4 ----
+"""
+
+
+FLASH_ERASED = """
+ Image             Size(Bytes)    Date   Version
+ ----------------- -------------- ------ --------------
+ Primary Image     :   0
+ Secondary Image   :   10475866   03/09/16 W.15.14.0012
+
+ Boot Rom Version: W.14.04
+ Default Boot    : Secondary
+"""
+
+
+@check("show flash with an erased image keeps both rows honest")
+def _t_flash_erased():
+    data = P.parse_flash(FLASH_ERASED)
+    slots = {img["slot"]: img for img in data["images"]}
+    # The blank date/version columns must not swallow the next line: the
+    # erased image stays empty and the intact one keeps its own row.
+    assert sorted(slots) == ["primary", "secondary"], slots
+    assert slots["primary"] == {
+        "slot": "primary", "size_bytes": 0, "date": "", "version": "",
+    }, slots["primary"]
+    assert slots["secondary"]["version"] == "W.15.14.0012", slots["secondary"]
+    assert data["default_boot"] == "secondary", data
+
+
+@check("show flash (W.15 and K.16 spellings)")
+def _t_flash():
+    data = P.parse_flash(FLASH_W15)
+    assert data["default_boot"] == "primary", data
+    assert data["boot_rom"] == "W.14.04", data
+    slots = {img["slot"]: img for img in data["images"]}
+    assert slots["primary"]["version"] == "W.15.14.0012", slots
+    assert slots["primary"]["size_bytes"] == 10475866, slots
+    assert slots["secondary"]["date"] == "01/22/15", slots
+
+    data = P.parse_flash(FLASH_K16)
+    assert data["default_boot"] == "secondary", data
+    assert data["boot_rom"] == "KB.16.01.0006", data
+    assert len(data["images"]) == 2, data
+
+
+@check("show version")
+def _t_version():
+    data = P.parse_version(VERSION_W15)
+    assert data["version"] == "W.15.14.0012", data
+    assert data["boot_image"] == "secondary", data
+    assert data["build_date"] == "Mar  9 2016 14:35:37", data
+    # Factory-installed builds carry a lowercase suffix, printed verbatim.
+    data = P.parse_version(VERSION_W15.replace("W.15.14.0012", "W.15.14.0012m"))
+    assert data["version"] == "W.15.14.0012m", data
+
+
+@check("show logging -> structured events")
+def _t_event_log():
+    events = P.parse_event_log(EVENT_LOG)
+    assert len(events) == 4, [e["message"] for e in events]
+    assert events[0]["severity"] == "W"
+    assert events[0]["severity_name"] == "warning"
+    assert events[0]["code"] == "00331"
+    assert events[0]["module"] == "FFI"
+    assert events[0]["message"].startswith("port 5-Excessive"), events[0]
+    # The wrapped line folds into the entry above it.
+    assert events[2]["message"] == "System went down without saving crash data", events[2]
+    # Old trains have no event code column.
+    assert events[3]["code"] == "" and events[3]["module"] == "ports", events[3]
+
+
+@check("plan: firmware & boot intents")
+def _t_plan_firmware():
+    p = plan.build("firmware.boot", {"image": "secondary"})
+    assert p.commands == ["boot system flash secondary"], p.commands
+    assert p.exec_level and any(r.level == "danger" for r in p.risks), p.risks
+
+    p = plan.build("firmware.default_boot", {"image": "primary"})
+    assert p.commands == ["boot set-default flash primary"], p.commands
+    assert not any(r.level == "danger" for r in p.risks), p.risks
+
+    p = plan.build("firmware.copy", {"to": "secondary"})
+    assert p.commands == ["copy flash flash secondary"], p.commands
+
+    p = plan.build("firmware.erase", {"image": "secondary"})
+    assert any(r.level == "danger" for r in p.risks), p.risks
+
+    p = plan.build("firmware.download", {
+        "server": "192.168.1.50", "filename": "W_15_14_0012.swi", "image": "secondary",
+    })
+    assert p.commands == ["copy tftp flash 192.168.1.50 W_15_14_0012.swi secondary"], p.commands
+
+    for bad in (
+        {"image": "tertiary"},
+        {},
+    ):
+        try:
+            plan.build("firmware.boot", bad)
+        except plan.PlanError:
+            pass
+        else:
+            raise AssertionError(f"accepted {bad}")
+
+    try:
+        plan.build("firmware.download", {"server": "10.0.0.1", "filename": "a b.swi", "image": "primary"})
+    except plan.PlanError:
+        pass
+    else:
+        raise AssertionError("accepted a file name with a space")
+
+
+@check("plan: reload modes")
+def _t_plan_reload():
+    p = plan.build("firmware.reload", {"mode": "now"})
+    assert p.commands == ["reload"] and p.exec_level
+    assert any(r.level == "danger" for r in p.risks), p.risks
+
+    p = plan.build("firmware.reload", {"mode": "after", "minutes": 90})
+    assert p.commands == ["reload after 01:30"], p.commands
+
+    p = plan.build("firmware.reload", {"mode": "after", "minutes": 2 * 1440 + 65})
+    assert p.commands == ["reload after 02:01:05"], p.commands
+
+    p = plan.build("firmware.reload", {"mode": "at", "time": "23:15", "date": "08/18/26"})
+    assert p.commands == ["reload at 23:15 08/18/26"], p.commands
+
+    # Cancelling a scheduled reboot must not demand the danger confirmation.
+    p = plan.build("firmware.reload", {"mode": "cancel"})
+    assert p.commands == ["reload cancel"], p.commands
+    assert not any(r.level == "danger" for r in p.risks), p.risks
+
+    # Value ranges, not just shapes: 99:99 / month 13 / 3-digit years and
+    # non-ASCII digits must all fail at plan time, not on the switch.
+    for bad in (
+        {"mode": "at", "time": "25 Uhr"},
+        {"mode": "at", "time": "99:99"},
+        {"mode": "at", "time": "23:15", "date": "13/05"},
+        {"mode": "at", "time": "23:15", "date": "08/17/126"},
+        {"mode": "at", "time": "٢٣:١٥"},
+    ):
+        try:
+            plan.build("firmware.reload", bad)
+        except plan.PlanError:
+            pass
+        else:
+            raise AssertionError(f"accepted {bad}")
+
+    try:
+        plan.build("firmware.download", {
+            "server": "сервер", "filename": "img.swi", "image": "primary",
+        })
+    except plan.PlanError:
+        pass
+    else:
+        raise AssertionError("accepted a non-ASCII TFTP server")
+
+
+PORT_SECURITY = """
+ Port Security
+
+  Port  Learn Mode  | Action                 Eavesdrop Prevention
+  ----- ----------- + ---------------------- --------------------
+  1     Static      | Send Alarm, Disable    Disabled
+  2     Continuous  | None                   Disabled
+  3     Continuous  | None                   Disabled
+"""
+
+SHOW_CPU = """
+ 4 percent busy, from 300 sec average
+ 1 percent busy, from 5 sec average
+"""
+
+SHOW_MEMORY = """
+ Status and Counters - System Memory Information
+
+  Params memory usage
+   Total     :     1,048,576
+   Free      :       524,288
+
+  System memory usage
+   Total     :   118,464,512
+   Free      :    86,970,368
+"""
+
+
+@check("generic structured parser: kv + filterable tables")
+def _t_structured():
+    data = P.parse_structured(PORT_SECURITY)
+    assert len(data["tables"]) == 1, data
+    t = data["tables"][0]
+    assert t["headers"][0] == "Port", t["headers"]
+    assert len(t["rows"]) == 3, t["rows"]
+    assert t["rows"][0]["Learn Mode"] == "Static", t["rows"][0]
+    assert "Send Alarm" in t["rows"][0]["Action"], t["rows"][0]
+
+    # KV-only output has no tables but keeps the pairs.
+    data = P.parse_structured(" Telnet-Server: Enabled\n Telnet Sessions : 2\n")
+    assert not data["tables"], data
+    assert data["kv"]["Telnet-Server"] == "Enabled", data
+
+    # An empty table ("no entries") must not hide the populated one below it.
+    stacked = (
+        " Port Access Status\n\n"
+        "  Port  Status\n"
+        "  ----- ------\n"
+        "\n"
+        " 802.1X Configuration\n\n"
+        "  Port  Auth\n"
+        "  ----- ------\n"
+        "  1     Yes\n"
+    )
+    data = P.parse_structured(stacked)
+    assert len(data["tables"]) == 1, data["tables"]
+    assert data["tables"][0]["rows"][0]["Auth"] == "Yes", data["tables"]
+
+    # A single full-width dash run is a divider between record blocks, not a
+    # column separator -- it must not spawn a one-column garbage table.
+    divided = (
+        " Telnet Activity\n\n"
+        "  --------------------------------------------------------\n"
+        "  Session : ** 1\n  Privilege: Manager\n  From : Console\n"
+        "  --------------------------------------------------------\n"
+        "  Session :    2\n  Privilege: Operator\n  From : 10.0.0.5\n"
+    )
+    data = P.parse_structured(divided)
+    assert data["tables"] == [], data["tables"]
+    assert data["kv"].get("Privilege") == "Manager", data["kv"]
+
+
+@check("kv parser keeps 'Label [default] : value' lines")
+def _t_kv_defaults():
+    kv = P.parse_kv(" STP Enabled [No] : Yes\n Force Version [MSTP-operation] : MSTP-operation\n")
+    assert kv == {"STP Enabled": "Yes", "Force Version": "MSTP-operation"}, kv
+    # Two bracketed pairs sharing one line (the port-security layout).
+    kv = P.parse_kv("  Learn Mode [Continuous] : Static       Address Limit [1] : 4\n")
+    assert kv == {"Learn Mode": "Static", "Address Limit": "4"}, kv
+
+
+@check("show cpu / show memory as resource fallbacks")
+def _t_resources():
+    assert P.parse_cpu(SHOW_CPU) == "4"
+    assert P.parse_cpu("CPU utilization: 17 %") == "17"
+    assert P.parse_cpu("Total CPU Utilization (%) : 6") == "6"
+    assert P.parse_cpu("no numbers here") == ""
+
+    mem = P.parse_memory(SHOW_MEMORY)
+    # The system block, not the params block above it.
+    assert mem == {"total": "118464512", "free": "86970368"}, mem
+    assert P.parse_memory("Total : 1,000\nFree : 400")["total"] == "1000"
+    # A trailing Total-only block must not steal the pairing.
+    mem = P.parse_memory(SHOW_MEMORY + "\n  Packet buffers\n   Total : 2,000\n")
+    assert mem == {"total": "118464512", "free": "86970368"}, mem
+    # K-train label style.
+    mem = P.parse_memory(" Total Bytes : 190,102,272\n Free Bytes : 121,867,776\n Lowest Free : 121,241,600\n")
+    assert mem == {"total": "190102272", "free": "121867776"}, mem
+
+
+class FakeChannel:
+    """Scripted ByteChannel: each sent line advances to the next canned reply."""
+
+    def __init__(self, script):
+        #: list of (reply | TransportError) delivered one per sent line.
+        self.script = list(script)
+        self.sent = []
+        self.pending = b""
+
+    def send_bytes(self, data):
+        self.sent.append(data.decode())
+        if self.script:
+            self.pending = self.script.pop(0)
+
+    def recv_bytes(self, size, timeout):
+        if isinstance(self.pending, Exception):
+            exc = self.pending
+            self.pending = b""
+            raise exc
+        data = self.pending if isinstance(self.pending, bytes) else self.pending.encode()
+        self.pending = b""
+        return data
+
+    def close(self):
+        pass
+
+
+@check("reboot dialogue: save question answered per intent, EOF means rebooting")
+def _t_reboot_dialogue():
+    assert CONFIRM_RE.search("Do you want to save current configuration [y/n/^C]? ")
+
+    chan = FakeChannel([
+        "reload\nDevice will be rebooted, do you want to continue [y/n]? ",
+        "y\nDo you want to save current configuration [y/n/^C]? ",
+        TransportError("SSH connection closed by switch"),
+    ])
+    device = ProCurveDevice(ProCurveShell(chan), "test")
+    from backend.transport import SAVE_CONFIRM_RE
+    result = device._run_reboot("reload", confirm_map=((SAVE_CONFIRM_RE, "n"),))
+    assert result["ok"] and result["rebooting"], result
+    # The continue question got "y", the save question the mapped "n".
+    assert chan.sent == ["reload\n", "y\n", "n\n"], chan.sent
+
+
+@check("console reload never saves: the save question gets 'n'")
+def _t_console_reload_no_save():
+    chan = FakeChannel([
+        "reload\nDevice will be rebooted, do you want to continue [y/n]? ",
+        "y\nDo you want to save current configuration [y/n/^C]? ",
+        TransportError("SSH connection closed by switch"),
+    ])
+    device = ProCurveDevice(ProCurveShell(chan), "test")
+    try:
+        device.run_raw("reload", timeout=5)
+    except TransportError:
+        pass  # the session dying is what a real reboot looks like
+    # Continue: yes. Save the running config on the way down: never silently.
+    assert chan.sent == ["reload\n", "y\n", "n\n"], chan.sent
+
+
+@check("reboot dialogue: a returning prompt means the switch did NOT reboot")
+def _t_reboot_rejected():
+    chan = FakeChannel([
+        "boot system flash secondary\nThis will reboot the system, continue [y/n]? ",
+        "y\nThe Secondary OS image is not valid.  Boot aborted.\nSW-CORE# ",
+    ])
+    device = ProCurveDevice(ProCurveShell(chan), "test")
+    result = device._run_reboot("boot system flash secondary")
+    assert result["rebooting"] is False, result
+    assert result["ok"] is False, result
+    assert "not valid" in (result["error"] or ""), result
 
 
 def main() -> int:

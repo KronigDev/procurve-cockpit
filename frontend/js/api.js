@@ -55,7 +55,8 @@ export const api = {
   data: (section) => request('GET', `/api/data/${section}`),
   probe: () => request('POST', '/api/probe'),
   plan: (intent, payload) => request('POST', '/api/plan', { intent, payload }),
-  apply: (commands, save = false) => request('POST', '/api/apply', { commands, save }),
+  apply: (commands, save = false, execLevel = false) =>
+    request('POST', '/api/apply', { commands, save, exec_level: execLevel }),
   exec: (command, timeout = 60) => request('POST', '/api/exec', { command, timeout }),
   save: () => request('POST', '/api/save'),
   uploadConfig: (lines, save = false) =>

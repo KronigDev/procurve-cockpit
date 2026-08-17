@@ -19,6 +19,8 @@ from .parsers import (
     parse_arp,
     parse_cdp_neighbors,
     parse_config_text,
+    parse_cpu,
+    parse_event_log,
     parse_flash,
     parse_lldp_detail,
     parse_ip_config,
@@ -26,6 +28,7 @@ from .parsers import (
     parse_lldp_config,
     parse_lldp_neighbors,
     parse_mac_table,
+    parse_memory,
     parse_modules,
     parse_poe,
     parse_port_config,
@@ -35,12 +38,22 @@ from .parsers import (
     parse_snmp_server,
     parse_stp,
     parse_stp_port_config,
+    parse_structured,
     parse_system_info,
     parse_trunks,
+    parse_version,
     parse_vlan_ports,
     parse_vlans,
 )
-from .transport import CommandResult, ProCurveShell, SSHChannel, TelnetChannel, TransportError
+from .transport import (
+    NO_SAVE_MAP,
+    SAVE_CONFIRM_RE,
+    CommandResult,
+    ProCurveShell,
+    SSHChannel,
+    TelnetChannel,
+    TransportError,
+)
 
 log = logging.getLogger(__name__)
 
@@ -174,9 +187,18 @@ class ProCurveDevice:
         return first  # type: ignore[return-value]
 
     def _parsed(self, command: str, parser, *, cache: float = 0.0, timeout: float = 40.0) -> Fetch:
-        fetch = self.show(command, cache=cache, timeout=timeout)
+        shared = self.show(command, cache=cache, timeout=timeout)
+        # Work on a private copy: the cached Fetch is shared between callers,
+        # and two sections parse the same command with different parsers
+        # ("show spanning-tree config" feeds both the port table and the
+        # structured card) -- mutating the shared object races between them.
+        fetch = Fetch(
+            command=shared.command,
+            raw=shared.raw,
+            error=shared.error,
+            transcript=shared.transcript,
+        )
         if fetch.error:
-            fetch.data = None
             return fetch
         try:
             fetch.data = parser(fetch.raw)
@@ -195,6 +217,14 @@ class ProCurveDevice:
 
     def _system_info(self, *, cache: float) -> Fetch:
         return self._first_answer(self.SYSTEM_INFO_COMMANDS, parse_system_info, cache=cache)
+
+    def _structured(self, command: str, *, cache: float = 0.0, timeout: float = 40.0) -> Fetch:
+        """A ``show`` command parsed into the generic kv+tables structure.
+
+        Used for everything without a dedicated parser, so the UI never has to
+        fall back to dumping console text.
+        """
+        return self._parsed(command, parse_structured, cache=cache, timeout=timeout)
 
     def probe(self) -> Capabilities:
         """Work out what this unit can do, so the UI hides what it cannot."""
@@ -224,11 +254,29 @@ class ProCurveDevice:
 
     def system(self) -> dict[str, Any]:
         info = self._system_info(cache=5)
-        version = self.show("show version", cache=300)
+        version = self._parsed("show version", parse_version, cache=300)
         flash = self._parsed("show flash", parse_flash, cache=60)
         uptime_seconds = _uptime_seconds(version.raw + "\n" + info.raw)
+
+        # Not every train answers the status page at all ("Invalid input:
+        # system-information"), and some that do omit CPU or memory.  `show
+        # cpu` and `show memory` exist everywhere, so fill the gaps from them
+        # -- the dashboard's resource tiles must not depend on one command.
+        data = dict(info.data or {})
+        if not data.get("cpu"):
+            cpu = self._parsed("show cpu", parse_cpu, cache=5, timeout=20)
+            if cpu.data:
+                data["cpu"] = cpu.data
+        if not (data.get("mem_total") and data.get("mem_free")):
+            mem = self._parsed("show memory", parse_memory, cache=15, timeout=20)
+            if mem.data and mem.data.get("total"):
+                data["mem_total"] = data.get("mem_total") or mem.data["total"]
+                data["mem_free"] = data.get("mem_free") or mem.data["free"]
+        info_payload = info.as_dict()
+        info_payload["data"] = data or None
+
         return {
-            "info": info.as_dict(),
+            "info": info_payload,
             "version": version.as_dict(),
             "flash": flash.as_dict(),
             "uptime_seconds": uptime_seconds,
@@ -339,8 +387,8 @@ class ProCurveDevice:
     def spanning_tree(self) -> dict[str, Any]:
         return {
             "stp": self._parsed("show spanning-tree", parse_stp, cache=5).as_dict(),
-            "config": self.show("show spanning-tree config", cache=15).as_dict(),
-            "mst": self.show("show spanning-tree mst-config", cache=30).as_dict(),
+            "config": self._structured("show spanning-tree config", cache=15).as_dict(),
+            "mst": self._structured("show spanning-tree mst-config", cache=30).as_dict(),
         }
 
     def neighbors(self) -> dict[str, Any]:
@@ -371,8 +419,8 @@ class ProCurveDevice:
         return {
             "ip": self._parsed("show ip", parse_ip_config, cache=5).as_dict(),
             "routes": self._parsed("show ip route", parse_routes, cache=5).as_dict(),
-            "rip": self.show("show ip rip", cache=30).as_dict(),
-            "helper": self.show("show ip helper-address", cache=30).as_dict(),
+            "rip": self._structured("show ip rip", cache=30).as_dict(),
+            "helper": self._structured("show ip helper-address", cache=30).as_dict(),
         }
 
     def poe(self) -> dict[str, Any]:
@@ -380,46 +428,59 @@ class ProCurveDevice:
             "brief": self._parsed(
                 "show power-over-ethernet brief", parse_poe, cache=3
             ).as_dict(),
-            "summary": self.show("show power-over-ethernet", cache=5).as_dict(),
+            "summary": self._structured("show power-over-ethernet", cache=5).as_dict(),
         }
 
     def security(self) -> dict[str, Any]:
         return {
-            "port_security": self.show("show port-security", cache=15).as_dict(),
-            "authentication": self.show("show authentication", cache=30).as_dict(),
-            "radius": self.show("show radius", cache=30).as_dict(),
-            "tacacs": self.show("show tacacs", cache=30).as_dict(),
-            "dhcp_snooping": self.show("show dhcp-snooping", cache=15).as_dict(),
-            "arp_protect": self.show("show arp-protect", cache=30).as_dict(),
-            "8021x": self.show("show port-access authenticator", cache=30).as_dict(),
+            "port_security": self._structured("show port-security", cache=15).as_dict(),
+            "authentication": self._structured("show authentication", cache=30).as_dict(),
+            "radius": self._structured("show radius", cache=30).as_dict(),
+            "tacacs": self._structured("show tacacs", cache=30).as_dict(),
+            "dhcp_snooping": self._structured("show dhcp-snooping", cache=15).as_dict(),
+            "arp_protect": self._structured("show arp-protect", cache=30).as_dict(),
+            "8021x": self._structured("show port-access authenticator", cache=30).as_dict(),
             "snmp": self._parsed("show snmp-server", parse_snmp_server, cache=30).as_dict(),
-            "ssh": self.show("show ip ssh", cache=30).as_dict(),
-            "telnet": self.show("show telnet", cache=30).as_dict(),
-            "web": self.show("show web-management", cache=30).as_dict(),
+            "ssh": self._structured("show ip ssh", cache=30).as_dict(),
+            "telnet": self._structured("show telnet", cache=30).as_dict(),
+            "web": self._structured("show web-management", cache=30).as_dict(),
         }
 
     def qos(self) -> dict[str, Any]:
         return {
-            "queue": self.show("show qos queue-config", cache=30).as_dict(),
-            "port_priority": self.show("show qos port-priority", cache=30).as_dict(),
-            "dscp": self.show("show qos dscp-map", cache=30).as_dict(),
-            "device_priority": self.show("show qos device-priority", cache=30).as_dict(),
-            "rate_limit": self.show("show rate-limit all", cache=30).as_dict(),
+            "queue": self._structured("show qos queue-config", cache=30).as_dict(),
+            "port_priority": self._structured("show qos port-priority", cache=30).as_dict(),
+            "dscp": self._structured("show qos dscp-map", cache=30).as_dict(),
+            "device_priority": self._structured("show qos device-priority", cache=30).as_dict(),
+            "rate_limit": self._structured("show rate-limit all", cache=30).as_dict(),
         }
 
     def acls(self) -> dict[str, Any]:
         return {
-            "list": self.show("show access-list", cache=15).as_dict(),
+            "list": self._structured("show access-list", cache=15).as_dict(),
+            # Kept as text on purpose: this is the editor's source material.
             "config": self.show("show access-list config", cache=15).as_dict(),
-            "ports": self.show("show access-list ports all", cache=15).as_dict(),
+            "ports": self._structured("show access-list ports all", cache=15).as_dict(),
+        }
+
+    def firmware(self) -> dict[str, Any]:
+        """Flash images, boot settings and their raw sources."""
+        return {
+            "flash": self._parsed("show flash", parse_flash, cache=10).as_dict(),
+            "version": self._parsed("show version", parse_version, cache=10).as_dict(),
+            # Not every train has these two; the panel hides them on error.
+            "boot_history": self._structured("show boot-history", cache=120).as_dict(),
+            "config_files": self._structured("show config files", cache=30).as_dict(),
         }
 
     def logging(self) -> dict[str, Any]:
         return {
-            "log": self.show("show logging -r", cache=5, timeout=60).as_dict(),
-            "debug": self.show("show debug", cache=30).as_dict(),
+            "log": self._parsed(
+                "show logging -r", parse_event_log, cache=5, timeout=60
+            ).as_dict(),
+            "debug": self._structured("show debug", cache=30).as_dict(),
             "time": self.show("show time", cache=5).as_dict(),
-            "sntp": self.show("show sntp", cache=30).as_dict(),
+            "sntp": self._structured("show sntp", cache=30).as_dict(),
         }
 
     def config(self) -> dict[str, Any]:
@@ -437,8 +498,16 @@ class ProCurveDevice:
 
     # -- write side ---------------------------------------------------------
 
-    def apply(self, commands: list[str], *, save: bool = False) -> dict[str, Any]:
-        """Push *commands* through config mode, then optionally ``write memory``."""
+    def apply(
+        self, commands: list[str], *, save: bool = False, exec_level: bool = False
+    ) -> dict[str, Any]:
+        """Push *commands* through config mode, then optionally ``write memory``.
+
+        With *exec_level* the commands run at manager exec level instead --
+        that is where ``boot``, ``reload``, ``copy`` and ``erase`` live.
+        """
+        if exec_level:
+            return self._apply_exec(commands, save=save)
         results = self.shell.run_config(commands)
         payload = [
             {"command": r.command, "output": r.output, "error": r.error, "ok": r.ok}
@@ -454,9 +523,103 @@ class ProCurveDevice:
             "saved": saved,
         }
 
+    def _apply_exec(self, commands: list[str], *, save: bool = False) -> dict[str, Any]:
+        """Run *commands* at manager exec level.
+
+        ``save`` runs ``write memory`` *first*, not last: exec commands do not
+        create config, and pending changes should be on flash before the reboot
+        these commands usually cause.  A failed save aborts the batch -- the
+        whole point of asking for it was to not reboot with unsaved changes.
+        """
+        results: list[dict[str, Any]] = []
+        saved = None
+        rebooting = False
+        # `reload`/`boot` ask "Do you want to save current configuration
+        # [y/n/^C]?" when the running config is dirty. Answer it the way the
+        # user answered the Apply / Apply & save choice.
+        confirm_map = ((SAVE_CONFIRM_RE, "y" if save else "n"),)
+        with self.shell.lock:
+            if save:
+                saved = self._as_dict(self.shell.run("write memory", timeout=60))
+                if not saved["ok"]:
+                    self._cache.clear()
+                    return {"results": [], "ok": False, "saved": saved, "rebooting": False}
+            if "config" in self.shell.state.context:
+                self.shell.run("exit", timeout=10)
+            for command in commands:
+                if _REBOOT_RE.match(command):
+                    result = self._run_reboot(command, confirm_map=confirm_map)
+                    results.append(result)
+                    if result["rebooting"]:
+                        rebooting = True
+                        break  # the switch is going down; nothing else can run
+                    continue
+                # Image copies (flash-to-flash, TFTP) legitimately take minutes;
+                # run() waits out the full timeout, so this is real headroom.
+                timeout = 600.0 if re.match(r"\s*copy\b", command, re.I) else 60.0
+                results.append(
+                    self._as_dict(
+                        self.shell.run(command, timeout=timeout, confirm_map=confirm_map)
+                    )
+                )
+        self._cache.clear()
+        return {
+            "results": results,
+            "ok": all(r["ok"] for r in results),
+            "saved": saved,
+            "rebooting": rebooting,
+        }
+
+    def _run_reboot(self, command: str, confirm_map=()) -> dict[str, Any]:
+        """Send a command that takes the switch down on purpose.
+
+        The session dying afterwards is the success signal, not an error: both
+        channels raise :class:`TransportError` when the far end closes.  If the
+        prompt comes back instead, the switch is demonstrably still up -- some
+        rejections ("Boot aborted.") are not in the error phrase lists, so the
+        prompt itself is the proof, not the text.
+        """
+        try:
+            # A real reboot returns almost immediately via the EOF raise; the
+            # generous timeout exists for slow *rejections* (image checks can
+            # take a while before "Boot aborted"), which must not be
+            # misreported as a reboot.
+            result = self.shell.run(command, timeout=30.0, confirm_map=confirm_map)
+        except TransportError:
+            return {
+                "command": command,
+                "output": "(connection closed -- the switch is rebooting)",
+                "error": None,
+                "ok": True,
+                "rebooting": True,
+            }
+        if result.error:
+            # Still up: this train rejected the command.
+            return {**self._as_dict(result), "rebooting": False}
+        if result.reason == "prompt":
+            # The last line carries the switch's parting words ("Boot
+            # aborted."); the first is just the echoed confirm question.
+            lines = [line.strip() for line in result.output.split("\n") if line.strip()]
+            detail = lines[-1] if lines else ""
+            return {
+                **self._as_dict(result),
+                "ok": False,
+                "error": detail or "The switch answered instead of rebooting.",
+                "rebooting": False,
+            }
+        # Silence until the deadline: the session is going away without a clean
+        # TCP close (links drop before the teardown). Treat it as the reboot.
+        return {**self._as_dict(result), "ok": True, "rebooting": True}
+
     def run_raw(self, command: str, timeout: float = 60.0) -> dict[str, Any]:
-        """Run a single command exactly as typed (used by the CLI console)."""
-        result = self.shell.run(command, timeout=timeout)
+        """Run a single command exactly as typed (used by the CLI console).
+
+        The save-config question a typed ``reload`` asks is answered "n": a
+        console reboot must never silently commit the running config -- that
+        would break rebooting to discard a bad change.  The dialogue, answer
+        included, stays visible in the transcript.
+        """
+        result = self.shell.run(command, timeout=timeout, confirm_map=NO_SAVE_MAP)
         self._cache.clear()
         return self._as_dict(result)
 
@@ -485,6 +648,13 @@ class ProCurveDevice:
 # --------------------------------------------------------------------------
 # helpers
 # --------------------------------------------------------------------------
+
+#: Commands that end the CLI session by design.  `boot set-default` only sets a
+#: flag, and `reload cancel` / scheduled reloads leave the session up.
+_REBOOT_RE = re.compile(
+    r"^\s*(?:boot(?!\s+set-default)\b|reload(?!\s+(?:cancel|after|at))\b)", re.I
+)
+
 
 _MODEL_RE = re.compile(r"\b(J\d{4}[A-Z])\b")
 _UPTIME_RE = re.compile(

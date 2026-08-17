@@ -1,12 +1,17 @@
 // App shell: login, navigation, panel lifecycle.
 
 import { api, state } from './api.js';
-import { changeContext, onApplied, writeMemory } from './changes.js';
+import {
+  changeContext, clearPending, discardPending, onApplied, onPendingChanged,
+  openPendingReview, pendingCount, writeMemory,
+} from './changes.js';
 import {
   bytesToMb, formatUptime, h, loading, setBusy, setStatus, toast,
 } from './ui.js';
 
 import dashboard from './panels/dashboard.js';
+import events from './panels/events.js';
+import firmware from './panels/firmware.js';
 import ports from './panels/ports.js';
 import vlans from './panels/vlans.js';
 import switching from './panels/switching.js';
@@ -19,6 +24,7 @@ import consolePanel from './panels/console.js';
 
 const PANELS = [
   dashboard,
+  events,
   ports,
   vlans,
   ...switching,
@@ -26,6 +32,7 @@ const PANELS = [
   ...network,
   ...security,
   ...systemPanels,
+  firmware,
   config,
   consolePanel,
 ];
@@ -81,6 +88,10 @@ loginForm.addEventListener('submit', async (ev) => {
 function startApp() {
   document.getElementById('login').hidden = true;
   document.getElementById('app').hidden = false;
+  // A fresh session starts clean: staged changes from a previous session
+  // belong to a different switch/login and must never carry over.
+  clearPending();
+  setUnsaved(false);
   buildNav();
   updateTopbar();
   loadManagementContext();
@@ -216,6 +227,8 @@ async function refreshStatusPrompt() {
 
 function showLogin() {
   state.token = null;
+  clearPending();
+  setUnsaved(false);
   document.getElementById('app').hidden = true;
   document.getElementById('login').hidden = false;
 }
@@ -223,29 +236,60 @@ function showLogin() {
 // ── topbar actions ────────────────────────────────────────────────────
 
 document.getElementById('btn-refresh').addEventListener('click', () => current && goto(current.id));
-document.getElementById('btn-save').addEventListener('click', async () => {
-  const ok = await writeMemory();
-  if (ok) setUnsaved(false);
-});
+document.getElementById('btn-save').addEventListener('click', () => writeMemory());
 document.getElementById('btn-disconnect').addEventListener('click', async () => {
+  if (pendingCount()
+    && !window.confirm(`${pendingCount()} staged change(s) were never applied and will be lost. Disconnect anyway?`)) {
+    return;
+  }
   try { await api.disconnect(); } catch { /* session may already be gone */ }
   showLogin();
+});
+
+// Staged changes live only in this tab — closing or reloading loses them.
+window.addEventListener('beforeunload', (ev) => {
+  if (pendingCount()) { ev.preventDefault(); ev.returnValue = ''; }
+});
+
+// ── staged changes ────────────────────────────────────────────────────
+document.getElementById('btn-pending').addEventListener('click', openPendingReview);
+document.getElementById('btn-discard').addEventListener('click', discardPending);
+onPendingChanged((count) => {
+  document.getElementById('pending-box').hidden = !count;
+  document.getElementById('btn-pending').textContent =
+    `${count} pending change${count === 1 ? '' : 's'} …`;
 });
 
 function setUnsaved(value) {
   unsaved = value;
   document.getElementById('unsaved-badge').hidden = !value;
+  // The Save button only exists while there is something to save.
+  document.getElementById('btn-save').hidden = !value;
 }
 
-// Any applied change without an immediate save leaves the switch dirty.
-onApplied(() => { setUnsaved(true); });
+// Any applied change without an immediate save leaves the switch dirty --
+// and the current panel shows pre-apply state, so re-render it.  `saved`
+// arrives true when the apply already included `write memory`; `savedOnly`
+// marks a bare write memory, which changes nothing a panel shows and must
+// not wipe half-typed forms with a re-render.
+onApplied(({ saved, savedOnly } = {}) => {
+  if (savedOnly) {
+    if (saved) setUnsaved(false);
+    return;
+  }
+  setUnsaved(!saved);
+  if (current) goto(current.id);
+});
 
 document.addEventListener('keydown', (ev) => {
   if (ev.target.matches('input, textarea, select')) return;
+  // No global shortcuts while a modal is up -- 'r' would re-render the panel
+  // behind the review, Ctrl+S would write memory mid-decision.
+  if (!document.getElementById('modal').hidden) return;
   if (ev.key === 'r' && !ev.ctrlKey && !ev.metaKey) { ev.preventDefault(); current && goto(current.id); }
   if (ev.key === 's' && (ev.ctrlKey || ev.metaKey)) {
     ev.preventDefault();
-    writeMemory().then((ok) => ok && setUnsaved(false));
+    writeMemory();
   }
 });
 

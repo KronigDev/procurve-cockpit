@@ -3,7 +3,7 @@
 import { api, state } from '../api.js';
 import { execCommand, propose, writeMemory } from '../changes.js';
 import {
-  badge, card, checkbox, closeModal, h, openModal, toast,
+  badge, card, closeModal, h, openModal, toast,
 } from '../ui.js';
 import { downloadText } from './system.js';
 
@@ -37,7 +37,9 @@ export default {
         h('button.btn.btn-save', {
           text: 'write memory (running → startup)',
           disabled: !data.unsaved,
-          onclick: () => writeMemory().then(refresh),
+          // This panel displays the diff the save just resolved, so it is the
+          // one place a save is followed by a local refresh.
+          onclick: () => writeMemory().then((ok) => ok && refresh()),
         }),
       ),
     ]));
@@ -56,7 +58,6 @@ export default {
         toast(`${file.name} loaded (${uploadArea.value.split('\n').length} lines)`, 'info');
       },
     });
-    const saveAfter = checkbox('Save after transfer (write memory)', false);
 
     root.appendChild(h('div.grid.cols-2', null,
       card('Backup', null, [
@@ -81,7 +82,10 @@ export default {
       card('Restore / push lines', null, [
         h('div.form-actions', null, fileInput),
         uploadArea,
-        saveAfter.el,
+        h('p.note', {
+          text: 'The transfer is staged like any other change — whether to save '
+            + 'is chosen when the pending changes are applied.',
+        }),
         h('div.form-actions', null,
           h('button.btn.btn-primary', {
             text: 'Preview & transfer',

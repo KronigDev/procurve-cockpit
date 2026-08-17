@@ -89,11 +89,15 @@
     </div>
     <div class="topbar-stats" id="topbar-stats"></div>
     <div class="topbar-actions">
+      <span id="pending-box" class="pending-box" hidden>
+        <button class="btn btn-primary" id="btn-pending" title="Review and apply the staged changes">0 pending</button>
+        <button class="btn btn-ghost" id="btn-discard" title="Throw the staged changes away">Discard</button>
+      </span>
       <span class="badge badge-warn" id="unsaved-badge" hidden title="Running config differs from startup config">
         unsaved
       </span>
       <button class="btn btn-ghost" id="btn-refresh" title="Reload the current view (R)">Reload</button>
-      <button class="btn btn-save" id="btn-save" title="write memory">Save</button>
+      <button class="btn btn-save" id="btn-save" hidden title="write memory — running config to startup config">Save</button>
       <button class="btn btn-ghost" id="btn-disconnect">Disconnect</button>
     </div>
   </header>

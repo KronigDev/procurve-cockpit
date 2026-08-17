@@ -91,7 +91,17 @@ PROMPT_RE = re.compile(
 )
 MORE_RE = re.compile(r"--\s*MORE\s*--", re.I)
 ANYKEY_RE = re.compile(r"press any key to continue", re.I)
-CONFIRM_RE = re.compile(r"(\[y/n\]|\(y/n\)|\[yes/no\]|\(yes/no\))[^\n]*\??\s*\Z", re.I)
+# The `/^C` variant is the unsaved-config question `reload` and `boot` ask:
+# "Do you want to save current configuration [y/n/^C]?".
+CONFIRM_RE = re.compile(
+    r"(\[y/n(?:/\^?c)?\]|\(y/n(?:/\^?c)?\)|\[yes/no\]|\(yes/no\))[^\n]*\??\s*\Z", re.I
+)
+#: That question specifically. Callers pick the answer per intent; the console
+#: and config paths answer "n" so a typed `reload` never silently commits the
+#: running config to flash -- rebooting to discard a bad change must keep
+#: working.
+SAVE_CONFIRM_RE = re.compile(r"save\s+current\s+configuration", re.I)
+NO_SAVE_MAP = ((SAVE_CONFIRM_RE, "n"),)
 USER_PROMPT_RE = re.compile(r"(?:^|\n)\s*(?:username|login)\s*:\s*\Z", re.I)
 PASS_PROMPT_RE = re.compile(r"(?:^|\n)\s*password\s*:\s*\Z", re.I)
 
@@ -318,16 +328,30 @@ class SSHChannel:
     def send_bytes(self, data: bytes) -> None:
         if self._chan is None:
             raise TransportError("not connected")
-        self._chan.sendall(data)
+        try:
+            self._chan.sendall(data)
+        except (OSError, paramiko.SSHException) as exc:
+            raise TransportError(f"SSH connection lost: {exc}") from exc
 
     def recv_bytes(self, size: int, timeout: float) -> bytes:
         if self._chan is None:
             raise TransportError("not connected")
         self._chan.settimeout(timeout)
         try:
-            return self._chan.recv(size)
+            data = self._chan.recv(size)
         except socket.timeout:
             return b""
+        except (OSError, paramiko.SSHException) as exc:
+            # An abortive close (TCP RST while the switch reboots) must look
+            # the same as a clean EOF to the callers.
+            raise TransportError(f"SSH connection lost: {exc}") from exc
+        if not data:
+            # paramiko returns b"" only at EOF (a quiet channel raises
+            # socket.timeout above). Raising here mirrors the telnet channel,
+            # gives `reload`/`boot` their "session died" success signal, and
+            # stops the read loop from spinning on a dead channel.
+            raise TransportError("SSH connection closed by switch")
+        return data
 
     def close(self) -> None:
         for obj in (self._chan, self._transport):
@@ -392,7 +416,10 @@ class TelnetChannel:
     def send_bytes(self, data: bytes) -> None:
         if self._sock is None:
             raise TransportError("not connected")
-        self._sock.sendall(data.replace(bytes([IAC]), bytes([IAC, IAC])))
+        try:
+            self._sock.sendall(data.replace(bytes([IAC]), bytes([IAC, IAC])))
+        except OSError as exc:
+            raise TransportError(f"telnet connection lost: {exc}") from exc
 
     def recv_bytes(self, size: int, timeout: float) -> bytes:
         if self._sock is None:
@@ -402,6 +429,9 @@ class TelnetChannel:
             raw = self._sock.recv(size)
         except socket.timeout:
             return b""
+        except OSError as exc:
+            # RST during a reboot must look the same as a clean close.
+            raise TransportError(f"telnet connection lost: {exc}") from exc
         if not raw:
             raise TransportError("telnet connection closed by switch")
         return self._negotiate(raw)
@@ -479,6 +509,10 @@ class CommandResult:
     #: command whose output ends up empty can still be inspected in the UI --
     #: "(empty)" on its own is impossible to debug.
     transcript: str = ""
+    #: How the read ended: 'prompt' (the CLI answered), 'timeout' (silence
+    #: until the deadline) or 'match'. `reload` uses this to tell "switch is
+    #: rebooting" apart from "switch answered something unexpected".
+    reason: str = ""
 
     @property
     def ok(self) -> bool:
@@ -579,9 +613,16 @@ class ProCurveShell:
         sent_user = sent_pass = False
         self.chan.send_bytes(b"\n")
         while time.monotonic() < deadline:
-            text, reason = self._read_until(
-                4.0, stop=(USER_PROMPT_RE, PASS_PROMPT_RE), idle_stop=1.2
-            )
+            try:
+                text, reason = self._read_until(
+                    4.0, stop=(USER_PROMPT_RE, PASS_PROMPT_RE), idle_stop=1.2
+                )
+            except TransportError as exc:
+                # The switch said its piece and hung up ("maximum number of
+                # sessions", access denied by an ACL) -- surface those words.
+                raise TransportError(
+                    f"{exc}. Last output:\n{self.last_raw[-500:]}"
+                ) from exc
             if reason == "prompt":
                 self._update_state(text)
                 self._post_login()
@@ -637,23 +678,42 @@ class ProCurveShell:
 
     # -- commands -----------------------------------------------------------
 
-    def run(self, command: str, timeout: float = 30.0, confirm: str | None = "y") -> CommandResult:
+    def run(
+        self,
+        command: str,
+        timeout: float = 30.0,
+        confirm: str | None = "y",
+        confirm_map: Sequence[tuple[re.Pattern[str], str]] = (),
+    ) -> CommandResult:
         """Send *command* and return everything up to the next prompt.
 
         *confirm* is the answer fed to ``[y/n]`` questions; pass ``None`` to
-        leave them unanswered (the caller then sees the question in the output).
+        leave them unanswered (the caller then sees the question in the
+        output).  *confirm_map* overrides the answer for specific questions --
+        the first pattern matching the question's tail wins.  The read waits
+        for the full *timeout*: a ``copy flash`` that stays silent for minutes
+        while it writes only ends the call when the prompt returns or the
+        deadline expires, never earlier.
         """
         with self.lock:
             self.chan.send_bytes(command.encode() + b"\n")
             collected = ""
+            reason = "timeout"
             deadline = time.monotonic() + timeout
             while time.monotonic() < deadline:
-                text, reason = self._read_until(min(timeout, 20.0), stop=(CONFIRM_RE,))
-                collected = text
-                if reason == "prompt":
-                    break
+                text, reason = self._read_until(
+                    deadline - time.monotonic(), stop=(CONFIRM_RE,)
+                )
+                # Each read starts a fresh buffer, so append -- and keeping the
+                # question text means a confirm dialogue stays inspectable.
+                collected += text
                 if reason == "match" and confirm is not None:
-                    self.chan.send_bytes(confirm.encode() + b"\n")
+                    answer = confirm
+                    for pattern, override in confirm_map:
+                        if pattern.search(text[-300:]):
+                            answer = override
+                            break
+                    self.chan.send_bytes(answer.encode() + b"\n")
                     continue
                 break
             self.last_raw = collected
@@ -664,6 +724,7 @@ class ProCurveShell:
                 output=body,
                 error=detect_error(body) or detect_error(collected),
                 transcript=collected,
+                reason=reason,
             )
 
     @staticmethod
@@ -703,7 +764,9 @@ class ProCurveShell:
             for line in lines:
                 if not line.strip() or line.strip().startswith("!"):
                     continue
-                results.append(self.run(line, timeout=timeout))
+                # NO_SAVE_MAP: a raw `reload` in an uploaded config must not
+                # silently commit the running config on its way down.
+                results.append(self.run(line, timeout=timeout, confirm_map=NO_SAVE_MAP))
             results.append(self.run("exit", timeout=timeout))
         return results
 

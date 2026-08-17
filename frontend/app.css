@@ -578,6 +578,13 @@ details.raw-toggle > summary:hover { color: var(--accent); }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.pending-box { display: inline-flex; gap: 6px; align-items: center; }
+.pending-change {
+  border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
+  padding: 8px 10px; margin-bottom: 8px;
+}
+.pending-head { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; font-size: 12.5px; }
+
 .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
 .toolbar input[type=search], .toolbar input[type=text] { width: 220px; }
 .chip {

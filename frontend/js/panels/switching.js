@@ -3,7 +3,7 @@
 import { api } from '../api.js';
 import { propose } from '../changes.js';
 import {
-  badge, card, field, h, input, kv, rawBlock, rawCard, select, table, toast,
+  badge, card, field, h, input, kv, rawBlock, select, structCard, table, toast,
 } from '../ui.js';
 
 const trunks = {
@@ -83,7 +83,17 @@ const trunks = {
       ),
     ]));
 
-    root.appendChild(rawCard('LACP status', data.lacp));
+    root.appendChild(card('LACP status', data.lacp.command, [
+      table([
+        { key: 'port', label: 'Port', mono: true },
+        { key: 'enabled', label: 'LACP' },
+        { key: 'trunk', label: 'Trunk group', mono: true },
+        { key: 'status', label: 'Status' },
+        { key: 'partner', label: 'Partner' },
+        { key: 'key', label: 'Key', num: true },
+      ], data.lacp.data || [], { emptyText: 'No LACP information reported.' }),
+      rawBlock(data.lacp),
+    ], null, true));
   },
 };
 
@@ -160,9 +170,10 @@ const stp = {
         { key: 'designated_bridge', label: 'Designated Bridge', mono: true },
       ], info.ports || []),
       rawBlock(data.stp),
-      rawBlock(data.config),
-      rawBlock(data.mst),
     ], null, true));
+
+    root.appendChild(structCard('Per-port STP configuration', data.config));
+    root.appendChild(structCard('MST region configuration', data.mst));
   },
 };
 

@@ -4,7 +4,7 @@
 import { api } from '../api.js';
 import { propose } from '../changes.js';
 import {
-  badge, card, field, h, input, kv, rawBlock, rawCard, table, toast,
+  badge, card, field, h, input, kv, rawBlock, structCard, table, toast,
 } from '../ui.js';
 
 const neighbors = {
@@ -279,8 +279,8 @@ const routing = {
       ]),
     ));
 
-    root.appendChild(rawCard('RIP', data.rip));
-    root.appendChild(rawCard('DHCP helper addresses', data.helper));
+    root.appendChild(structCard('RIP', data.rip));
+    root.appendChild(structCard('DHCP helper addresses', data.helper));
   },
 };
 

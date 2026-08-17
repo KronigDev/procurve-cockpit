@@ -2,7 +2,7 @@
 
 import { api } from '../api.js';
 import { propose } from '../changes.js';
-import { badge, card, field, h, input, rawBlock, rawCard, select, table, toast } from '../ui.js';
+import { badge, card, field, h, input, rawBlock, select, structCard, table, toast } from '../ui.js';
 
 export default {
   id: 'poe',
@@ -96,6 +96,6 @@ export default {
       ),
     ]));
 
-    root.appendChild(rawCard('PoE system status', data.summary));
+    root.appendChild(structCard('PoE system status', data.summary));
   },
 };

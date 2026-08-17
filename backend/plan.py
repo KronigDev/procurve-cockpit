@@ -636,6 +636,135 @@ def build_qos(p: dict) -> Plan:
     return plan
 
 
+# --------------------------------------------------------------------------
+# firmware / boot management -- exec level, not config mode
+# --------------------------------------------------------------------------
+
+
+def _flash_image(p: dict, key: str = "image") -> str:
+    image = str(p.get(key) or "").strip().lower()
+    if image not in ("primary", "secondary"):
+        raise PlanError("Flash image must be 'primary' or 'secondary'.")
+    return image
+
+
+def build_firmware_boot(p: dict) -> Plan:
+    """Reboot from a specific flash image."""
+    image = _flash_image(p)
+    plan = Plan(title=f"Reboot from the {image} image", exec_level=True)
+    plan.commands = [f"boot system flash {image}"]
+    plan.notes.append("Every session drops while the switch reboots (typically 1-3 minutes).")
+    plan.notes.append(
+        "Unsaved configuration changes are lost in the reboot -- choose "
+        "'Apply & save' to keep them."
+    )
+    return plan
+
+
+def build_firmware_default(p: dict) -> Plan:
+    image = _flash_image(p)
+    plan = Plan(title=f"Set default boot image to {image}", exec_level=True)
+    plan.commands = [f"boot set-default flash {image}"]
+    plan.notes.append("Takes effect at the next reboot; nothing restarts now.")
+    plan.notes.append(
+        "Older trains (2510/2810) lack 'boot set-default'; there, booting an "
+        "image with 'boot system flash' also makes it the default."
+    )
+    return plan
+
+
+def build_firmware_copy(p: dict) -> Plan:
+    """``copy flash flash`` names the *destination*; the source is the other one."""
+    destination = _flash_image(p, "to")
+    source = "secondary" if destination == "primary" else "primary"
+    plan = Plan(title=f"Copy {source} image to {destination}", exec_level=True)
+    plan.commands = [f"copy flash flash {destination}"]
+    plan.risks.append(
+        Risk("warn", f"The current {destination} image is overwritten.", plan.commands[0])
+    )
+    plan.notes.append("Copying takes up to a minute; the CLI is busy meanwhile.")
+    return plan
+
+
+def build_firmware_erase(p: dict) -> Plan:
+    image = _flash_image(p)
+    plan = Plan(title=f"Erase the {image} image", exec_level=True)
+    plan.commands = [f"erase flash {image}"]
+    plan.notes.append("The switch refuses to erase the image it booted from.")
+    return plan  # analyze_risk marks `erase flash` as danger
+
+
+def build_firmware_download(p: dict) -> Plan:
+    """Pull a new firmware file onto the switch over TFTP."""
+    image = _flash_image(p)
+    server = str(p.get("server") or "").strip()
+    if not re.fullmatch(r"[\w.\-]+", server or "", re.ASCII):
+        raise PlanError("TFTP server must be an IP address or host name without spaces.")
+    filename = str(p.get("filename") or "").strip()
+    if not re.fullmatch(r"[\w.\-/]+", filename or "", re.ASCII):
+        raise PlanError("File name is empty or contains characters the CLI chokes on.")
+    plan = Plan(title=f"Download firmware to the {image} image", exec_level=True)
+    plan.commands = [f"copy tftp flash {server} {filename} {image}"]
+    plan.risks.append(Risk("warn", f"The current {image} image is overwritten.", plan.commands[0]))
+    plan.notes.append(
+        "A TFTP transfer plus flashing takes several minutes -- do not power off "
+        "the switch, and leave this page open."
+    )
+    return plan
+
+
+def build_reload(p: dict) -> Plan:
+    """``reload``: now, scheduled (after / at), or cancelling the schedule."""
+    mode = p.get("mode", "now")
+    if mode == "now":
+        plan = Plan(title="Reboot the switch", exec_level=True)
+        plan.commands = ["reload"]
+        plan.notes.append("Reboots from the default flash image.")
+        plan.notes.append(
+            "Unsaved configuration changes are lost in the reboot -- choose "
+            "'Apply & save' to keep them."
+        )
+    elif mode == "after":
+        try:
+            minutes = int(p.get("minutes") or 0)
+        except (TypeError, ValueError) as exc:
+            raise PlanError("Scheduled reload needs a number of minutes.") from exc
+        if not 1 <= minutes <= 99 * 1440:
+            raise PlanError("Scheduled reload must be 1 minute to 99 days away.")
+        days, rest = divmod(minutes, 1440)
+        hours, mins = divmod(rest, 60)
+        stamp = f"{days:02d}:{hours:02d}:{mins:02d}" if days else f"{hours:02d}:{mins:02d}"
+        plan = Plan(title=f"Reboot in {minutes} minute(s)", exec_level=True)
+        plan.commands = [f"reload after {stamp}"]
+        plan.notes.append("The session stays up until the timer fires. 'Cancel' stops it.")
+    elif mode == "at":
+        at_time = str(p.get("time") or "").strip()
+        clock = re.fullmatch(r"(\d{1,2}):(\d{2})(?::(\d{2}))?", at_time, re.ASCII)
+        if (
+            not clock
+            or int(clock.group(1)) > 23
+            or int(clock.group(2)) > 59
+            or (clock.group(3) and int(clock.group(3)) > 59)
+        ):
+            raise PlanError("Reload time must look like 23:15.")
+        command = f"reload at {at_time}"
+        date = str(p.get("date") or "").strip()
+        if date:
+            day = re.fullmatch(r"(\d{1,2})/(\d{1,2})(?:/(\d{2}|\d{4}))?", date, re.ASCII)
+            if not day or not 1 <= int(day.group(1)) <= 12 or not 1 <= int(day.group(2)) <= 31:
+                raise PlanError("Reload date must look like 08/17 or 08/17/26.")
+            command += f" {date}"
+        plan = Plan(title=f"Reboot at {at_time}" + (f" on {date}" if date else ""), exec_level=True)
+        plan.commands = [command]
+        plan.notes.append("The session stays up until then. 'Cancel' stops it.")
+    elif mode == "cancel":
+        plan = Plan(title="Cancel the scheduled reboot", exec_level=True)
+        plan.commands = ["reload cancel"]
+    else:
+        raise PlanError(f"Unknown reload mode: {mode!r}")
+    return plan
+
+
 def build_raw(p: dict) -> Plan:
     """Free-form config lines -- the escape hatch for everything not modelled."""
     lines = p.get("lines")
@@ -671,6 +800,12 @@ BUILDERS: dict[str, Callable[[dict], Plan]] = {
     "mirror.set": build_mirror,
     "routing.set": build_routing,
     "qos.set": build_qos,
+    "firmware.boot": build_firmware_boot,
+    "firmware.default_boot": build_firmware_default,
+    "firmware.copy": build_firmware_copy,
+    "firmware.erase": build_firmware_erase,
+    "firmware.download": build_firmware_download,
+    "firmware.reload": build_reload,
     "raw": build_raw,
 }
 
@@ -691,7 +826,12 @@ def build(intent: str, payload: dict) -> Plan:
 _LOCKOUT_PATTERNS: tuple[tuple[re.Pattern[str], str, str], ...] = (
     (re.compile(r"^\s*no\s+ip\s+ssh\b", re.I), "danger", "This disables SSH -- the way you are connected right now."),
     (re.compile(r"^\s*erase\s+startup", re.I), "danger", "This wipes the saved configuration."),
-    (re.compile(r"^\s*(reload|boot)\b", re.I), "danger", "This reboots the switch."),
+    # `boot set-default` only flips a flag; `reload cancel` stops a reboot.
+    (re.compile(r"^\s*boot(?!\s+set-default)\b", re.I), "danger", "This reboots the switch."),
+    (re.compile(r"^\s*reload(?!\s+cancel)\b", re.I), "danger",
+     "This reboots the switch (immediately or when the timer fires)."),
+    (re.compile(r"^\s*erase\s+flash\b", re.I), "danger",
+     "This deletes a firmware image from flash."),
     (re.compile(r"^\s*no\s+vlan\s+1\b", re.I), "danger", "DEFAULT_VLAN cannot be removed."),
     (re.compile(r"^\s*setup\b", re.I), "warn", "'setup' opens an interactive screen the UI cannot drive."),
     (re.compile(r"^\s*(menu|logout|exit\s+all)\b", re.I), "warn", "This leaves the CLI session."),
