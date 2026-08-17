@@ -3,7 +3,7 @@
 import { api, state } from '../api.js';
 import { faceplate, legend } from '../faceplate.js';
 import {
-  badge, bytesToMb, card, formatUptime, h, kv, rawBlock, stat, structured, table,
+  badge, bytesToMb, card, facts, formatUptime, h, kv, rawBlock, stat, structured, table,
 } from '../ui.js';
 import { sevBadge } from './events.js';
 
@@ -58,7 +58,7 @@ export default {
 
     root.appendChild(h('div.grid.cols-2', null,
       card('System', sys.info.command, [
-        kv([
+        facts([
           ['Name', info.name],
           ['Model', sys.capabilities?.model],
           ['Firmware', info.software],
@@ -69,7 +69,7 @@ export default {
           ['Contact', info.contact],
           ['MAC age time', info.mac_age ? `${info.mac_age} s` : ''],
           ['Time zone', info.time_zone],
-        ]),
+        ], ['Firmware', 'ROM', 'Serial number', 'Base MAC']),
         rawBlock(sys.info),
         rawBlock(sys.version),
         // Resource fallbacks (only fetched when the status page lacks them) —

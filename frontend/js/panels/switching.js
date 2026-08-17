@@ -3,7 +3,7 @@
 import { api } from '../api.js';
 import { propose } from '../changes.js';
 import {
-  badge, card, field, h, input, kv, rawBlock, select, structCard, table, toast,
+  badge, card, field, h, input, kv, rawBlock, select, structCard, table, toast, tracked,
 } from '../ui.js';
 
 const trunks = {
@@ -113,17 +113,30 @@ const stp = {
       h('p', { text: info.enabled ? `enabled · ${info.mode || ''}` : 'disabled' }),
     ));
 
-    const enabledSel = select([['', 'unchanged'], ['1', 'enabled'], ['0', 'disabled']]);
-    const modeSel = select([['', 'unchanged'], ['rstp', 'RSTP (802.1w)'], ['mstp', 'MSTP (802.1s)'], ['stp', 'STP (legacy)']]);
-    const prioInput = input({ type: 'number', min: 0, max: 15, placeholder: `current: ${info.priority || '—'}` });
+    // Preselect what the switch reports; the ● marks what moved.
+    const curMode = (() => {
+      const m = String(info.mode || '').toLowerCase();
+      if (m.includes('mst')) return 'mstp';
+      if (m.includes('rst') || m.includes('rapid')) return 'rstp';
+      if (m.includes('stp')) return 'stp';
+      return '';
+    })();
+    const enabled = tracked('Spanning Tree',
+      select([['1', 'enabled'], ['0', 'disabled']]), info.enabled ? '1' : '0');
+    const mode = tracked('Mode', select([
+      ['rstp', 'RSTP (802.1w)'], ['mstp', 'MSTP (802.1s)'], ['stp', 'STP (legacy)'],
+    ]), curMode);
+    const prio = tracked('Bridge priority',
+      input({ type: 'number', min: 0, max: 15 }), info.priority ?? '',
+      '(0–15, multiplied by 4096)');
     const mstName = input({ placeholder: 'MST region name' });
     const mstRev = input({ type: 'number', placeholder: 'MST revision' });
 
     root.appendChild(h('div.grid.cols-2', null,
       card('Global settings', null, [
-        field('Spanning Tree', enabledSel),
-        field('Mode', modeSel),
-        field('Bridge priority', prioInput, '(0–15, multiplied by 4096)'),
+        enabled.el,
+        mode.el,
+        prio.el,
         field('MST region', mstName),
         field('MST revision', mstRev),
         h('div.form-actions', null,
@@ -131,9 +144,9 @@ const stp = {
             text: 'Apply',
             onclick: () => {
               const payload = {};
-              if (enabledSel.value) payload.enabled = enabledSel.value === '1';
-              if (modeSel.value) payload.mode = modeSel.value;
-              if (prioInput.value !== '') payload.priority = Number(prioInput.value);
+              if (enabled.changed()) payload.enabled = enabled.control.value === '1';
+              if (mode.changed() && mode.control.value) payload.mode = mode.control.value;
+              if (prio.changed() && prio.control.value !== '') payload.priority = Number(prio.control.value);
               if (mstName.value) payload.mst_name = mstName.value;
               if (mstRev.value !== '') payload.mst_revision = Number(mstRev.value);
               if (!Object.keys(payload).length) { toast('Nothing changed.', 'info'); return; }

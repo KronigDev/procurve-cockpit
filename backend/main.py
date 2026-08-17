@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -139,6 +140,11 @@ class ConfigUploadRequest(BaseModel):
     save: bool = False
 
 
+class ShowRequest(BaseModel):
+    command: str
+    timeout: float = 60.0
+
+
 # --------------------------------------------------------------------------
 # connection lifecycle
 # --------------------------------------------------------------------------
@@ -232,6 +238,19 @@ async def data(section: str, x_session: str | None = Header(default=None)) -> di
     session = get_session(x_session)
     payload = await in_thread(SECTIONS[section], session.device)
     return {"section": section, "data": payload, "fetched_at": time.time()}
+
+
+@app.post("/api/show")
+async def show_structured(
+    req: ShowRequest, x_session: str | None = Header(default=None)
+) -> dict[str, Any]:
+    """A single ``show`` command with arguments, parsed into the generic
+    structure -- per-port statistics, RMON, ACL counters, `show tech`."""
+    command = req.command.strip()
+    if not re.match(r"(?i)^show(\s|$)", command) or "\n" in command:
+        raise HTTPException(status_code=400, detail="Only single 'show' commands are allowed here.")
+    session = get_session(x_session)
+    return await in_thread(session.device.show_structured, command, req.timeout)
 
 
 @app.post("/api/probe")

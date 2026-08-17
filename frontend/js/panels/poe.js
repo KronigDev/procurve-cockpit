@@ -47,8 +47,10 @@ export default {
         value: port.port, text: `${port.port} — ${port.status || ''} ${port.actual || ''}`,
       }));
     }
-    const prioSel = select([['', 'unchanged'], ['critical', 'critical'], ['high', 'high'], ['low', 'low']]);
-    const allocSel = select([['', 'unchanged'], ['usage', 'usage'], ['class', 'class'], ['value', 'value']]);
+    // Bulk action across many ports: "keep" means "do not touch this
+    // attribute" -- the per-port state is in the table above.
+    const prioSel = select([['', '— keep current —'], ['critical', 'critical'], ['high', 'high'], ['low', 'low']]);
+    const allocSel = select([['', '— keep current —'], ['usage', 'usage'], ['class', 'class'], ['value', 'value']]);
     const maxInput = input({ type: 'number', placeholder: 'max watts (optional)' });
 
     const chosen = () => [...portPicker.selectedOptions].map((o) => o.value);

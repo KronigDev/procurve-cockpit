@@ -846,6 +846,76 @@ def build_fault_finder(p: dict) -> Plan:
     return plan
 
 
+_CONSOLE_BAUD = (
+    "speed-sense", "1200", "2400", "4800", "9600", "19200", "38400", "57600", "115200",
+)
+
+
+def build_console(p: dict) -> Plan:
+    plan = Plan(title="Serial console settings")
+    cmds: list[str] = []
+    if p.get("baud_rate"):
+        if str(p["baud_rate"]) not in _CONSOLE_BAUD:
+            raise PlanError("Unknown console baud rate.")
+        cmds.append(f"console baud-rate {p['baud_rate']}")
+    if p.get("flow_control"):
+        if p["flow_control"] not in ("xon-xoff", "none"):
+            raise PlanError("Console flow control must be xon-xoff or none.")
+        cmds.append(f"console flow-control {p['flow_control']}")
+    if p.get("inactivity_timer") is not None:
+        timer = int(p["inactivity_timer"])
+        if not 0 <= timer <= 120:
+            raise PlanError("Console inactivity timer is 0-120 minutes.")
+        cmds.append(f"console inactivity-timer {timer}")
+    if not cmds:
+        raise PlanError("Nothing to change.")
+    plan.notes.append(
+        "Serial console changes take effect after 'write memory' plus a reboot "
+        "or console reconnect. This SSH session is unaffected."
+    )
+    plan.commands = cmds
+    return plan
+
+
+def build_front_panel(p: dict) -> Plan:
+    """The physical Clear/Reset buttons. Disabling recovery is a one-way door."""
+    plan = Plan(title="Front panel security")
+    cmds: list[str] = []
+    if p.get("password_clear") is not None:
+        cmds.append(
+            "front-panel-security password-clear"
+            if p["password_clear"] else "no front-panel-security password-clear"
+        )
+        if not p["password_clear"]:
+            plan.risks.append(
+                Risk("danger", "The Clear button will no longer reset lost passwords.")
+            )
+    if p.get("factory_reset") is not None:
+        cmds.append(
+            "front-panel-security factory-reset"
+            if p["factory_reset"] else "no front-panel-security factory-reset"
+        )
+        if not p["factory_reset"]:
+            plan.risks.append(
+                Risk("warn", "The Reset+Clear factory reset via the buttons is disabled.")
+            )
+    if p.get("password_recovery") is not None:
+        cmds.append(
+            "front-panel-security password-recovery"
+            if p["password_recovery"] else "no front-panel-security password-recovery"
+        )
+        if not p["password_recovery"]:
+            plan.risks.append(
+                Risk("danger",
+                     "Without password recovery, a lost manager password can only be "
+                     "fixed by wiping the whole configuration.")
+            )
+    if not cmds:
+        raise PlanError("Nothing to change.")
+    plan.commands = cmds
+    return plan
+
+
 # --------------------------------------------------------------------------
 # firmware / boot management -- exec level, not config mode
 # --------------------------------------------------------------------------
@@ -1019,6 +1089,8 @@ BUILDERS: dict[str, Callable[[dict], Plan]] = {
     "mac.lockout": build_mac_lockout,
     "mac.static": build_mac_static,
     "fault_finder.set": build_fault_finder,
+    "console.set": build_console,
+    "front_panel.set": build_front_panel,
     "firmware.boot": build_firmware_boot,
     "firmware.default_boot": build_firmware_default,
     "firmware.copy": build_firmware_copy,

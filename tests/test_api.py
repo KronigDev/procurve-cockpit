@@ -103,6 +103,7 @@ def _t_auth_gate():
         ("post", "/api/apply", {"commands": ["boot"], "exec_level": True}),
         ("post", "/api/apply", {"commands": ["hostname \"x\""]}),
         ("post", "/api/exec", {"command": "show version"}),
+        ("post", "/api/show", {"command": "show interfaces 1"}),
         ("post", "/api/save", None),
         ("get", "/api/config/download", None),
     ]:

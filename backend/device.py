@@ -491,6 +491,14 @@ class ProCurveDevice:
             "ports": self._structured("show access-list ports all", cache=15).as_dict(),
         }
 
+    def show_structured(self, command: str, timeout: float = 60.0) -> dict[str, Any]:
+        """One arbitrary ``show`` command, structured.
+
+        Backs the argumented reads the fixed sections cannot model: per-port
+        statistics, RMON counters, ACL statistics, ``show tech``.
+        """
+        return self._structured(command, cache=3, timeout=timeout).as_dict()
+
     def firmware(self) -> dict[str, Any]:
         """Flash images, boot settings and their raw sources."""
         return {

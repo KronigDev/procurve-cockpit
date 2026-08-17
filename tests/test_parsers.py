@@ -876,6 +876,57 @@ def _t_structured():
     assert data["kv"].get("Privilege") == "Manager", data["kv"]
 
 
+@check("stacked label-over-value output (show sntp on W.15)")
+def _t_stacked_kv():
+    text = (
+        "SNTP Authentication\n"
+        "    Disabled\n"
+        "Time Sync Mode\n"
+        "    Timep\n"
+        "SNTP Mode\n"
+        "    disabled\n"
+        "Poll Interval (sec)\n"
+        "    720\n"
+        "Source IP Selection\n"
+        "    Outgoing Interface\n"
+    )
+    data = P.parse_structured(text)
+    assert data["kv"]["Time Sync Mode"] == "Timep", data["kv"]
+    assert data["kv"]["SNTP Mode"] == "disabled", data["kv"]
+    assert data["kv"]["Poll Interval (sec)"] == "720", data["kv"]
+    # Colon output must never fall through to the stacked parser.
+    normal = P.parse_structured(" Telnet-Server: Enabled\n Telnet Sessions : 2\n")
+    assert normal["kv"]["Telnet-Server"] == "Enabled", normal["kv"]
+
+
+@check("plan: console & front-panel settings")
+def _t_plan_console_fp():
+    p = plan.build("console.set", {"baud_rate": "115200", "flow_control": "none", "inactivity_timer": 10})
+    assert p.commands == [
+        "console baud-rate 115200", "console flow-control none", "console inactivity-timer 10",
+    ], p.commands
+
+    p = plan.build("front_panel.set", {"password_recovery": False})
+    assert p.commands == ["no front-panel-security password-recovery"], p.commands
+    assert any(r.level == "danger" for r in p.risks), p.risks
+    p = plan.build("front_panel.set", {"password_clear": True})
+    assert p.commands == ["front-panel-security password-clear"], p.commands
+    assert not any(r.level == "danger" for r in p.risks), p.risks
+
+    for bad in (
+        {"baud_rate": "300"},
+        {"flow_control": "rts-cts"},
+        {"inactivity_timer": 999},
+        {},
+    ):
+        try:
+            plan.build("console.set", bad)
+        except plan.PlanError:
+            pass
+        else:
+            raise AssertionError(f"accepted {bad}")
+
+
 @check("kv parser keeps 'Label [default] : value' lines")
 def _t_kv_defaults():
     kv = P.parse_kv(" STP Enabled [No] : Yes\n Force Version [MSTP-operation] : MSTP-operation\n")

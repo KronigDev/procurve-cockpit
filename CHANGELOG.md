@@ -7,6 +7,34 @@ the versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added (feature completeness round)
+
+- **No more “unchanged” placeholders.** Forms open on the value the switch
+  actually reports (Access protocols, STP global, time sync, the port
+  inspector already did), and a ● marker with a hover explanation appears
+  on every field the moment it differs from that state. Submit handlers
+  send only the fields that moved. Bulk actions across many ports keep an
+  explicit “— keep current —” entry, since one selection can span
+  different values.
+- **System information as tiles.** The status page renders as a grid of
+  readable fact tiles on the dashboard and in System & time instead of a
+  cramped text list; raw output stays collapsed underneath.
+- **Per-port statistics** in the port inspector (single selection):
+  `show interfaces <port>` counters plus RMON statistics where the train
+  supports them — via a new `/api/show` endpoint that accepts exactly one
+  `show` command (anything else is a 400).
+- **ACL hit counters** (`show statistics aclv4 … port/vlan …`) in the ACL
+  panel, **`show tech` support dump** as a browser download, **serial
+  console settings** (baud, flow control, inactivity timer) and
+  **front-panel security** (Clear/Reset buttons, password recovery — with
+  the one-way-door warnings) as staged write plans.
+- The stacked `show sntp` output format (“label over indented value”) now
+  parses, so the Time card can preselect the switch’s actual sync mode.
+- **Protocols & Device-extras panels** (previous commit): the remaining
+  read surface of the CLI plus staged writes for GVRP, CDP, IGMP,
+  loop-protect, UDLD, sFlow, DHCP relay option 82, MAC lockout, static
+  MACs, fault finder and the credentials/USB toggles.
+
 ### Changed
 
 - **Stage → review → apply.** Config changes no longer go to the switch one

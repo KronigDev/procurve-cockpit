@@ -784,7 +784,41 @@ def parse_structured(text: str) -> dict[str, Any]:
         if next_idx <= idx:
             break
         idx = next_idx
-    return {"kv": parse_kv(text), "tables": tables}
+    kv = parse_kv(text)
+    if len(kv) < 2 and not tables:
+        # `show sntp` on W.15 prints "Label" with the value indented on the
+        # NEXT line -- no colons anywhere for the colon parser to find.
+        stacked = _parse_stacked_kv(text)
+        if len(stacked) > len(kv):
+            kv = stacked
+    return {"kv": kv, "tables": tables}
+
+
+_STACKED_LINE_RE = re.compile(r"^(\s*)(\S.*)$")
+
+
+def _parse_stacked_kv(text: str) -> dict[str, str]:
+    """Label-over-indented-value pairs (``SNTP Mode`` / ``    disabled``)."""
+    result: dict[str, str] = {}
+    lines = text.split("\n")
+    i = 0
+    while i < len(lines) - 1:
+        cur = _STACKED_LINE_RE.match(lines[i])
+        nxt = _STACKED_LINE_RE.match(lines[i + 1])
+        if (
+            cur and nxt
+            and ":" not in lines[i]
+            and not _is_dash_line(lines[i]) and not _is_dash_line(lines[i + 1])
+            and len(nxt.group(1)) >= len(cur.group(1)) + 2
+        ):
+            key = cur.group(2).strip()
+            value = nxt.group(2).strip()
+            if key and value:
+                result.setdefault(key, value)
+                i += 2
+                continue
+        i += 1
+    return result
 
 
 _CPU_RE = re.compile(r"(\d+)\s*(?:percent|%)", re.I)

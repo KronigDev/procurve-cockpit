@@ -3,7 +3,8 @@
 import { api } from '../api.js';
 import { propose } from '../changes.js';
 import {
-  card, field, h, input, kv, rawBlock, select, structCard, structured, toast,
+  card, facts, field, h, input, loading, rawBlock, select, structCard, structured,
+  toast, tracked,
 } from '../ui.js';
 
 const system = {
@@ -29,21 +30,52 @@ const system = {
     const contactInput = input({ value: info.contact || '' });
     const bannerInput = h('textarea', { placeholder: 'login banner (empty removes it)' });
 
-    const tzInput = input({ type: 'number', value: info.time_zone || '', placeholder: 'minutes, e.g. 60' });
-    const dstSel = select([
-      ['', 'unchanged'], ['none', 'none'], ['western-europe', 'Western Europe (EU)'],
+    // Current time-sync state, read from the switch (stacked `show sntp`
+    // output plus the status page) so every control opens on the truth.
+    const sntpKv = (logs.sntp.data && logs.sntp.data.kv) || {};
+    const kvGet = (obj, part) => {
+      const hit = Object.entries(obj).find(([k]) => k.toLowerCase().includes(part));
+      return hit ? hit[1] : '';
+    };
+    const normToken = (v) => String(v || '').trim().toLowerCase().replace(/\s+/g, '-');
+
+    const curSync = (() => {
+      const v = normToken(kvGet(sntpKv, 'time sync'));
+      if (!v) return '';
+      if (v.includes('timep') && v.includes('sntp')) return 'timep-or-sntp';
+      if (v.includes('timep')) return 'timep';
+      if (v.includes('sntp')) return 'sntp';
+      return 'none';
+    })();
+    const curSntpMode = (() => {
+      const v = normToken(kvGet(sntpKv, 'sntp mode'));
+      if (!v) return '';
+      if (v.includes('unicast')) return 'unicast';
+      if (v.includes('broadcast')) return 'broadcast';
+      return 'disabled';
+    })();
+    const curPoll = (kvGet(sntpKv, 'poll interval').match(/\d+/) || [''])[0];
+    const curDst = normToken((info.raw && info.raw['Daylight Time Rule']) || '');
+
+    const tz = tracked('Time zone',
+      input({ type: 'number', placeholder: 'minutes, e.g. 60' }),
+      info.time_zone ?? '', '(offset in minutes, CET = 60)');
+    const dst = tracked('Daylight saving rule', select([
+      ['none', 'none'], ['western-europe', 'Western Europe (EU)'],
       ['middle-europe-and-portugal', 'Middle Europe / Portugal'], ['alaska', 'Alaska'],
       ['southern-hemisphere', 'Southern hemisphere'], ['user-defined', 'user defined'],
-    ]);
-    const syncSel = select([
-      ['', 'unchanged'], ['sntp', 'SNTP'], ['timep', 'TIMEP'],
+    ]), curDst);
+    const sync = tracked('Time sync protocol', select([
+      ['sntp', 'SNTP'], ['timep', 'TIMEP'],
       ['timep-or-sntp', 'TIMEP or SNTP'], ['none', 'none (no timesync)'],
-    ]);
-    const sntpModeSel = select([
-      ['', 'unchanged'], ['unicast', 'unicast (poll the servers below)'],
+    ]), curSync, '(SNTP is the modern choice)');
+    const sntpMode = tracked('SNTP mode', select([
+      ['unicast', 'unicast (poll the servers below)'],
       ['broadcast', 'broadcast (listen passively)'], ['disabled', 'disabled (no sntp)'],
-    ]);
-    const pollInput = input({ type: 'number', min: 30, max: 720, placeholder: '30–720, default 720' });
+    ]), curSntpMode);
+    const poll = tracked('SNTP poll interval',
+      input({ type: 'number', min: 30, max: 720, placeholder: '30–720' }),
+      curPoll, '(seconds)');
     const sntpInput = input({ placeholder: '10.0.0.1, pool.ntp.org' });
 
     root.appendChild(h('div.grid.cols-2', null,
@@ -68,23 +100,19 @@ const system = {
         ),
       ]),
       card('Time', logs.time.command, [
-        h('pre.raw', { text: logs.time.raw || '' , style: { maxHeight: '110px' } }),
-        field('Time zone', tzInput, '(offset in minutes, CET = 60)'),
-        field('Daylight saving rule', dstSel),
-        field('Time sync protocol', syncSel, '(timesync — SNTP is the modern choice)'),
-        field('SNTP mode', sntpModeSel),
-        field('SNTP poll interval', pollInput, '(seconds)'),
+        h('p.note', { text: `Switch clock: ${(logs.time.raw || '').trim() || 'unknown'}` }),
+        tz.el, dst.el, sync.el, sntpMode.el, poll.el,
         field('SNTP servers', sntpInput, '(comma separated — setting servers also enables SNTP unicast)'),
         h('div.form-actions', null,
           h('button.btn.btn-primary', {
             text: 'Apply time settings',
             onclick: () => {
               const payload = {};
-              if (tzInput.value !== '') payload.timezone = Number(tzInput.value);
-              if (dstSel.value) payload.daylight_rule = dstSel.value;
-              if (syncSel.value) payload.time_sync = syncSel.value;
-              if (sntpModeSel.value) payload.sntp_mode = sntpModeSel.value;
-              if (pollInput.value !== '') payload.sntp_poll = Number(pollInput.value);
+              if (tz.changed() && tz.control.value !== '') payload.timezone = Number(tz.control.value);
+              if (dst.changed() && dst.control.value) payload.daylight_rule = dst.control.value;
+              if (sync.changed() && sync.control.value) payload.time_sync = sync.control.value;
+              if (sntpMode.changed() && sntpMode.control.value) payload.sntp_mode = sntpMode.control.value;
+              if (poll.changed() && poll.control.value !== '') payload.sntp_poll = Number(poll.control.value);
               const servers = sntpInput.value.split(',').map((s) => s.trim()).filter(Boolean);
               if (servers.length) payload.sntp_servers = servers;
               if (!Object.keys(payload).length) { toast('Nothing changed.', 'info'); return; }
@@ -96,8 +124,24 @@ const system = {
       ]),
     ));
 
+    // The status page as readable tiles: the headline facts first, then
+    // whatever else this train reports. Raw stays collapsed underneath.
+    const HEADLINE = [
+      ['Name', info.name], ['Contact', info.contact], ['Location', info.location],
+      ['Firmware', info.software], ['ROM', info.rom], ['Serial number', info.serial],
+      ['Base MAC', info.base_mac], ['Uptime', info.uptime], ['CPU', info.cpu ? `${info.cpu} %` : ''],
+      ['Memory total', info.mem_total], ['Memory free', info.mem_free],
+      ['MAC age time', info.mac_age ? `${info.mac_age} s` : ''], ['Time zone', info.time_zone],
+    ];
+    const shown = new Set([
+      'System Name', 'System Contact', 'System Location', 'Software revision',
+      'ROM Version', 'Serial Number', 'Base MAC Addr', 'Up Time', 'CPU Util (%)',
+      'MAC Age Time (sec)', 'Time Zone', 'Memory - Total', 'Free',
+    ]);
+    const rest = Object.entries(info.raw || {}).filter(([k]) => !shown.has(k));
     root.appendChild(card('System information', sys.info.command, [
-      kv(Object.entries(info.raw || {})),
+      facts(HEADLINE, ['Base MAC', 'Serial number', 'Firmware', 'ROM', 'Memory total', 'Memory free']),
+      rest.length ? facts(rest) : null,
       rawBlock(sys.info),
     ]));
   },
@@ -125,11 +169,11 @@ const logging = {
 
     const serverInput = input({ placeholder: '10.0.0.9' });
     const facilitySel = select([
-      ['', 'unchanged'], ...Array.from({ length: 8 }, (_, i) => [`local${i}`, `local${i}`]),
+      ['', '— keep current —'], ...Array.from({ length: 8 }, (_, i) => [`local${i}`, `local${i}`]),
       ['kern', 'kern'], ['user', 'user'], ['daemon', 'daemon'], ['syslog', 'syslog'],
     ]);
     const sevSel = select([
-      ['', 'unchanged'], ['debug', 'debug'], ['info', 'info'], ['warning', 'warning'],
+      ['', '— keep current —'], ['debug', 'debug'], ['info', 'info'], ['warning', 'warning'],
       ['error', 'error'], ['major', 'major'],
     ]);
 
@@ -273,6 +317,34 @@ const acls = {
 
     root.appendChild(structCard('ACL overview', data.list));
     root.appendChild(structCard('Assignment to ports / VLANs', data.ports));
+
+    // ── hit counters ────────────────────────────────────────────────────
+    const statName = input({ placeholder: 'ACL name or number', spellcheck: 'false' });
+    const statTarget = input({ placeholder: 'port 5   ·   vlan 20 in', spellcheck: 'false' });
+    const statHost = h('div');
+    root.appendChild(card('ACL statistics', 'show statistics aclv4 …', [
+      h('div.toolbar', null,
+        statName, statTarget,
+        h('button.btn.btn-primary.btn-sm', {
+          text: 'Load counters',
+          onclick: async () => {
+            if (!statName.value.trim() || !statTarget.value.trim()) {
+              toast('Enter the ACL and where it is applied.', 'err'); return;
+            }
+            statHost.replaceChildren(loading('Loading counters …'));
+            try {
+              const fetch = await api.showCmd(
+                `show statistics aclv4 ${statName.value.trim()} ${statTarget.value.trim()}`, 30,
+              );
+              statHost.replaceChildren(structured(fetch));
+            } catch (err) {
+              statHost.replaceChildren(h('p.note', { text: `Failed: ${err.message}` }));
+            }
+          },
+        }),
+      ),
+      statHost,
+    ]));
   },
 };
 

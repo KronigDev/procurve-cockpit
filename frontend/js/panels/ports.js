@@ -5,7 +5,8 @@ import { api } from '../api.js';
 import { propose } from '../changes.js';
 import { applySelection, faceplate, legend } from '../faceplate.js';
 import {
-  badge, card, checkbox, field, h, input, kv, rawBlock, segmented, select, table, toast,
+  badge, card, checkbox, field, h, input, kv, loading, rawBlock, segmented, select,
+  structured, table, toast,
 } from '../ui.js';
 
 const selected = new Set();
@@ -372,8 +373,8 @@ function stateSelect(options, current, props = {}) {
   const head = known
     ? []
     : [['', current.mixed
-      ? '— mixed, leave unchanged —'
-      : (current.raw ? `${current.raw} — unchanged` : '— unchanged —')]];
+      ? '— mixed, keep as is —'
+      : (current.raw ? `${current.raw} (as reported)` : '— keep as is —')]];
   const baseline = known ? current.value : '';
   const el = select([...head, ...options], { ...props, value: baseline });
   return { el, baseline, changed: () => el.value !== baseline };
@@ -414,6 +415,34 @@ function buildInspector(chosen, vlans, allPorts, refresh) {
         + (offCount ? `, ${offCount} disabled` : '')
         + '. Fields marked “mixed” differ within the selection.',
     }));
+  }
+
+  // -- per-port statistics (single port only) ------------------------------
+  if (chosen.length === 1) {
+    const statsHost = h('div');
+    const loadStats = async () => {
+      statsHost.replaceChildren(loading('Loading statistics …'));
+      try {
+        const [counters, rmon] = await Promise.all([
+          api.showCmd(`show interfaces ${ids[0]}`, 30),
+          api.showCmd(`show rmon statistics ${ids[0]}`, 30).catch(() => null),
+        ]);
+        statsHost.replaceChildren(
+          structured(counters),
+          rmon && !rmon.error && (rmon.raw || '').trim() ? structured(rmon) : null,
+        );
+      } catch (err) {
+        statsHost.replaceChildren(h('p.note', { text: `Statistics failed: ${err.message}` }));
+      }
+    };
+    nodes.push(h('div.form-actions', null,
+      h('button.btn.btn-sm', {
+        text: `Load statistics for port ${ids[0]}`,
+        title: `show interfaces ${ids[0]} + show rmon statistics ${ids[0]}`,
+        onclick: loadStats,
+      }),
+    ));
+    nodes.push(statsHost);
   }
 
   // -- quick enable/disable ------------------------------------------------
@@ -496,7 +525,7 @@ function buildInspector(chosen, vlans, allPorts, refresh) {
   const bcastInput = input({
     type: 'number', min: 0, max: 99,
     value: curBcast.mixed ? '' : (curBcast.value || ''),
-    placeholder: curBcast.mixed ? 'mixed' : 'unchanged',
+    placeholder: curBcast.mixed ? 'mixed' : 'not set',
   });
   const bcastBase = curBcast.mixed ? '' : (curBcast.value || '');
 

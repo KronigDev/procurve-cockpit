@@ -6,6 +6,7 @@ import { propose } from '../changes.js';
 import {
   card, field, h, input, select, structCard, toast,
 } from '../ui.js';
+import { downloadText } from './system.js';
 
 function maybeCard(title, fetch) {
   if (!fetch || fetch.error || !(fetch.raw || '').trim()) return null;
@@ -135,6 +136,79 @@ export default {
         h('p.note', { text: 'Current state is in the cards below; every change is staged with its risks.' }),
       ]),
     ));
+
+    // ── console + front panel + support dump ────────────────────────────
+    const baudSel = select([
+      ['', '— keep current —'], ['speed-sense', 'speed-sense (auto)'],
+      ...['1200', '2400', '4800', '9600', '19200', '38400', '57600', '115200']
+        .map((b) => [b, `${b} baud`]),
+    ]);
+    const flowSel = select([['', '— keep current —'], ['xon-xoff', 'XON/XOFF'], ['none', 'none']]);
+    const inactInput = input({ type: 'number', min: 0, max: 120, placeholder: '0 = never' });
+
+    const fpToggle = (label, key) => h('div.form-actions', { style: { alignItems: 'center' } },
+      h('span', { text: label, style: { minWidth: '180px', fontSize: '12.5px' } }),
+      h('button.btn.btn-sm', {
+        text: 'Enable',
+        onclick: () => propose('front_panel.set', { [key]: true }),
+      }),
+      h('button.btn.btn-sm.btn-danger', {
+        text: 'Disable',
+        onclick: () => propose('front_panel.set', { [key]: false }),
+      }),
+    );
+
+    const techBtn = h('button.btn', { text: 'Generate & download (takes ~1 minute)' });
+    techBtn.addEventListener('click', async () => {
+      techBtn.disabled = true;
+      techBtn.textContent = 'Collecting — the CLI is busy meanwhile …';
+      try {
+        const fetch = await api.showCmd('show tech', 300);
+        downloadText('show-tech.txt', fetch.raw || '(empty)');
+        toast('show tech downloaded', 'ok');
+      } catch (err) {
+        toast('show tech failed', 'err', err.message, 8000);
+      } finally {
+        techBtn.disabled = false;
+        techBtn.textContent = 'Generate & download (takes ~1 minute)';
+      }
+    });
+
+    root.appendChild(h('div.grid.cols-2', null,
+      card('Serial console', 'console …', [
+        h('p.note', { text: 'Current settings are in the card below; changes need a save + console reconnect.' }),
+        field('Baud rate', baudSel),
+        field('Flow control', flowSel),
+        field('Inactivity timer', inactInput, '(minutes, 0–120)'),
+        h('div.form-actions', null,
+          h('button.btn.btn-primary', {
+            text: 'Apply console settings',
+            onclick: () => {
+              const payload = {};
+              if (baudSel.value) payload.baud_rate = baudSel.value;
+              if (flowSel.value) payload.flow_control = flowSel.value;
+              if (inactInput.value !== '') payload.inactivity_timer = Number(inactInput.value);
+              if (!Object.keys(payload).length) { toast('Nothing changed.', 'info'); return; }
+              propose('console.set', payload);
+            },
+          }),
+        ),
+      ]),
+      card('Front panel buttons', 'front-panel-security', [
+        h('p.note', { text: 'The physical Clear/Reset buttons. Disabling password recovery is a one-way decision — read the risks in the preview.' }),
+        fpToggle('Clear button (password clear)', 'password_clear'),
+        fpToggle('Reset+Clear factory reset', 'factory_reset'),
+        fpToggle('Password recovery', 'password_recovery'),
+      ]),
+    ));
+
+    root.appendChild(card('Support dump', 'show tech', [
+      h('p.note', {
+        text: 'The full diagnostic dump HP support asks for. It is collected over the '
+          + 'live session and offered as a text file — nothing is stored on this server.',
+      }),
+      h('div.form-actions', null, techBtn),
+    ]));
 
     // ── read cards -- hidden on trains that reject the command ──────────
     for (const [title, fetch] of [

@@ -4,7 +4,8 @@
 import { api } from '../api.js';
 import { propose } from '../changes.js';
 import {
-  badge, card, checkbox, field, h, input, rawBlock, select, structCard, structured, table, toast,
+  badge, card, checkbox, field, h, input, rawBlock, select, structCard, structured,
+  table, toast, tracked,
 } from '../ui.js';
 
 const access = {
@@ -35,28 +36,28 @@ const access = {
       h('p', { text: 'Management protocols and local credentials' }),
     ));
 
-    const sshSel = select([['', 'unchanged'], ['1', 'ein'], ['0', 'aus']]);
-    const telnetSel = select([['', 'unchanged'], ['1', 'ein'], ['0', 'aus']]);
-    const webSel = select([['', 'unchanged'], ['1', 'ein'], ['0', 'aus']]);
+    const toBase = (state) => (state === 'on' ? '1' : state === 'off' ? '0' : '');
+    const onOff = () => select([['1', 'on'], ['0', 'off']]);
+    const ssh = tracked('SSH', onOff(), toBase(sshOn));
+    const telnet = tracked('Telnet', onOff(), toBase(telnetOn));
+    const web = tracked('Web interface', onOff(), toBase(webOn));
     const idleInput = input({ type: 'number', placeholder: 'seconds' });
 
     root.appendChild(h('div.grid.cols-2', null,
       card('Management protocols', null, [
-        h('p.note', {
-          text: `Detected right now: SSH ${sshOn} · Telnet ${telnetOn} · web ${webOn}`,
-        }),
-        field('SSH', sshSel),
-        field('Telnet', telnetSel),
-        field('Web interface', webSel),
+        h('p.note', { text: 'Each control opens on the state the switch reports; the ● marks what you changed here.' }),
+        ssh.el,
+        telnet.el,
+        web.el,
         field('Console timeout', idleInput, '(0 = never)'),
         h('div.form-actions', null,
           h('button.btn.btn-primary', {
             text: 'Apply',
             onclick: () => {
               const payload = {};
-              if (sshSel.value) payload.ssh = sshSel.value === '1';
-              if (telnetSel.value) payload.telnet = telnetSel.value === '1';
-              if (webSel.value) payload.web = webSel.value === '1';
+              if (ssh.changed() && ssh.control.value) payload.ssh = ssh.control.value === '1';
+              if (telnet.changed() && telnet.control.value) payload.telnet = telnet.control.value === '1';
+              if (web.changed() && web.control.value) payload.web = web.control.value === '1';
               if (idleInput.value !== '') payload.idle_timeout = Number(idleInput.value);
               if (!Object.keys(payload).length) { toast('Nothing changed.', 'info'); return; }
               propose('access.set', payload).then((ok) => ok && refresh());
