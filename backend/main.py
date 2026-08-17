@@ -61,6 +61,20 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="ProCurve Cockpit", version="1.0.0", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def no_stale_frontend(request, call_next):
+    """Force the browser to revalidate the frontend on every load.
+
+    Browsers happily serve stale JS/CSS from the memory cache without asking;
+    after an update that meant old panels until a hard refresh.  `no-cache`
+    still allows 304s (cheap), but never a silent stale copy.
+    """
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 # --------------------------------------------------------------------------
 # session registry
 # --------------------------------------------------------------------------
