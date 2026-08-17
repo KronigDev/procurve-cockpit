@@ -7,6 +7,24 @@ the versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Code quality
+
+CodeQL's quality suite reported 10 findings across 5 rules. All are addressed:
+
+- **Unused import** (2, Python): `Body` in `main.py`, `field` in `transport.py`.
+- **Unused variable, import, function or class** (3, JavaScript): leftover
+  `rawBlock`, `checkbox` and `table` imports in three panels.
+- **Statement has no effect** (3, Python): the `...` bodies of the
+  `ByteChannel` protocol, replaced by docstrings that say what each method has
+  to do.
+- **Empty except** (1, Python): `ProCurveDevice.close()` swallowed a
+  `TransportError` silently. It now logs at debug level and explains why the
+  case is normal — the switch drops the session on `reload` and on its own idle
+  timeout.
+- **Unhashable object hashed** (1, Python, severity error): `Risk` is now a
+  frozen dataclass, so it hashes by value and the risk de-duplication puts the
+  objects into the set directly instead of building a parallel key tuple.
+
 ### Fixed
 
 - **`show snmp-server` was parsed as one giant community table.** A table used

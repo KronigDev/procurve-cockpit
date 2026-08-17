@@ -3,7 +3,7 @@
 import { api } from '../api.js';
 import { propose } from '../changes.js';
 import {
-  badge, card, checkbox, field, h, input, kv, rawBlock, rawCard, select, table, toast,
+  badge, card, field, h, input, kv, rawBlock, rawCard, select, table, toast,
 } from '../ui.js';
 
 const trunks = {

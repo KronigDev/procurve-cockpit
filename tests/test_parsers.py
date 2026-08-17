@@ -357,7 +357,7 @@ def _t_strip_echo():
 @check("show interfaces config")
 def _t_port_config():
     cfg = P.parse_port_config(INTERFACES_CONFIG)
-    assert set(cfg) == {"1", "2", "3", "21"}, cfg
+    assert sorted(cfg) == ["1", "2", "21", "3"], cfg
     assert cfg["1"] == {
         "enabled": "Yes", "mode": "Auto", "flow_ctrl": "Disable", "mdi": "Auto",
     }, cfg["1"]

@@ -22,8 +22,12 @@ class PlanError(ValueError):
     """The intent could not be turned into valid CLI."""
 
 
-@dataclass
+@dataclass(frozen=True)
 class Risk:
+    """A warning about one command. Frozen so it is hashable and can go
+    straight into a set -- a risk is a statement of fact about a command, and
+    nothing ever edits one after it is raised."""
+
     level: str          # 'warn' | 'danger'
     message: str
     command: str = ""
@@ -737,12 +741,12 @@ def analyze_risk(commands: list[str], context: dict) -> list[Risk]:
         if mgmt_ip and mgmt_ip in command and re.search(r"no\s+ip\s+address", command, re.I):
             risks.append(Risk("danger", f"This removes {mgmt_ip}, the address you connected to.", command))
 
-    # De-duplicate identical (level, message, command) triples.
-    seen: set[tuple[str, str, str]] = set()
+    # De-duplicate, keeping the original order. Risk is frozen, so the objects
+    # compare and hash by value and no separate key tuple is needed.
+    seen: set[Risk] = set()
     unique: list[Risk] = []
     for risk in risks:
-        key = (risk.level, risk.message, risk.command)
-        if key not in seen:
-            seen.add(key)
+        if risk not in seen:
+            seen.add(risk)
             unique.append(risk)
     return unique

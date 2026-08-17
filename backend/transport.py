@@ -21,7 +21,7 @@ import re
 import socket
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Protocol, Sequence
 
 import paramiko
@@ -177,9 +177,14 @@ def assert_legacy_support() -> None:
 class ByteChannel(Protocol):
     """The minimal duplex byte pipe :class:`ProCurveShell` needs."""
 
-    def send_bytes(self, data: bytes) -> None: ...
-    def recv_bytes(self, size: int, timeout: float) -> bytes: ...
-    def close(self) -> None: ...
+    def send_bytes(self, data: bytes) -> None:
+        """Write *data* to the far end."""
+
+    def recv_bytes(self, size: int, timeout: float) -> bytes:
+        """Read up to *size* bytes, returning ``b""`` when *timeout* expires."""
+
+    def close(self) -> None:
+        """Tear the channel down; must tolerate an already dead connection."""
 
 
 @dataclass

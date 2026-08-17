@@ -3,7 +3,7 @@
 import { api, state } from '../api.js';
 import { execCommand, propose, writeMemory } from '../changes.js';
 import {
-  badge, card, checkbox, closeModal, h, openModal, rawBlock, toast,
+  badge, card, checkbox, closeModal, h, openModal, toast,
 } from '../ui.js';
 import { downloadText } from './system.js';
 

@@ -3,7 +3,7 @@
 import { api } from '../api.js';
 import { propose } from '../changes.js';
 import {
-  card, field, h, input, kv, rawBlock, rawCard, select, table, toast,
+  card, field, h, input, kv, rawBlock, rawCard, select, toast,
 } from '../ui.js';
 
 const system = {

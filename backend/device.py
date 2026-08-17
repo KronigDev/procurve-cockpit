@@ -476,7 +476,10 @@ class ProCurveDevice:
         try:
             self.shell.close()
         except TransportError:
-            pass
+            # Closing an already dead session is the normal case, not an error:
+            # the switch drops the connection on `reload` and on its own idle
+            # timeout, so we get here with a socket that is long gone.
+            log.debug("session was already closed", exc_info=True)
 
 
 # --------------------------------------------------------------------------
