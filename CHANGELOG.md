@@ -21,9 +21,15 @@ CodeQL's quality suite reported 10 findings across 5 rules. All are addressed:
   `TransportError` silently. It now logs at debug level and explains why the
   case is normal — the switch drops the session on `reload` and on its own idle
   timeout.
-- **Unhashable object hashed** (1, Python, severity error): `Risk` is now a
-  frozen dataclass, so it hashes by value and the risk de-duplication puts the
-  objects into the set directly instead of building a parallel key tuple.
+- **Unhashable object hashed** (1, Python, severity error) at
+  `parsers.py:248`: `_pick()` looked its keys up by indexing. Every caller
+  passes string literals, so it could not actually raise — but a helper that
+  fuzzily matches labels coming straight off the wire has no business being
+  able to. It now walks the key/value pairs instead of hashing, which also
+  makes its three widening match passes explicit.
+- `Risk` became a frozen dataclass along the way: it hashes by value, so risk
+  de-duplication puts the objects straight into the set instead of building a
+  parallel key tuple that could drift when a field is added.
 
 ### Fixed
 

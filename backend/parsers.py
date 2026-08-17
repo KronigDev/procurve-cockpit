@@ -243,17 +243,28 @@ def _memory(text: str, which: str) -> str:
 
 
 def _pick(kv: dict[str, str], *names: str) -> str:
+    """First value whose key matches one of *names*, in three widening passes.
+
+    The passes are tried in order across *all* names before the next one
+    starts, so an exact hit on the second name still beats a fuzzy hit on the
+    first.  Matching walks the pairs instead of indexing: labels come straight
+    off the wire, and a lookup helper should not be able to raise on one.
+    """
+    pairs = list(kv.items())
     for name in names:
-        if name in kv:
-            return kv[name]
-    lowered = {k.lower(): v for k, v in kv.items()}
+        for key, value in pairs:
+            if key == name:
+                return value
+    lowered = [(key.lower(), value) for key, value in pairs]
     for name in names:
-        if name.lower() in lowered:
-            return lowered[name.lower()]
+        needle = name.lower()
+        for key, value in lowered:
+            if key == needle:
+                return value
     # Last resort: the firmware sometimes prefixes a label ("Memory - Total").
     for name in names:
         needle = name.lower()
-        for key, value in lowered.items():
+        for key, value in lowered:
             if needle in key:
                 return value
     return ""
