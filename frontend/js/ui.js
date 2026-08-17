@@ -271,6 +271,60 @@ export function structCard(title, fetchObj) {
   return card(title, fetchObj.command, structured(fetchObj));
 }
 
+/**
+ * A form control bound to the value the switch currently reports.
+ * The control opens ON that value (never on an "unchanged" placeholder), the
+ * label carries a ● marker while the control differs from it, and submit
+ * handlers use `changed()` to send only fields that actually moved.
+ * For selects whose current value is not among the options, a "(as reported)"
+ * entry is inserted so the truth is always visible.
+ */
+export function tracked(labelText, control, currentValue, hint = '') {
+  const baseline = currentValue === null || currentValue === undefined
+    ? '' : String(currentValue);
+  if (control.tagName === 'SELECT') {
+    const known = [...control.options].some((o) => o.value === baseline);
+    if (!known) {
+      control.insertBefore(
+        h('option', {
+          value: baseline,
+          text: baseline ? `${baseline} (as reported)` : '— unknown —',
+        }),
+        control.firstChild,
+      );
+    }
+    control.value = baseline;
+  } else if ('value' in control) {
+    control.value = baseline;
+  }
+  const marker = h('span.dirty-dot', {
+    text: '●',
+    title: 'Changed here — not yet staged or applied to the switch',
+  });
+  marker.hidden = true;
+  const update = () => { marker.hidden = String(control.value) === baseline; };
+  control.addEventListener('input', update);
+  control.addEventListener('change', update);
+  const el = h('label.field', null,
+    h('span', null, labelText, marker, hint ? h('em', { text: ` ${hint}` }) : null),
+    control,
+  );
+  return { el, control, baseline, changed: () => String(control.value) !== baseline };
+}
+
+/** Key/value pairs as a grid of readable tiles instead of a cramped list. */
+export function facts(pairs, monoKeys = []) {
+  const grid = h('div.facts');
+  for (const [label, value] of pairs) {
+    if (value === null || value === undefined || value === '') continue;
+    grid.appendChild(h('div.fact', null,
+      h('div.label', { text: label, title: label }),
+      h(`div.value${monoKeys.includes(label) ? '.mono' : ''}`, { text: String(value) }),
+    ));
+  }
+  return grid;
+}
+
 export function field(labelText, control, hint = '') {
   return h('label.field', null,
     h('span', null, labelText, hint ? h('em', { text: ` ${hint}` }) : null),

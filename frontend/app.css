@@ -578,6 +578,21 @@ details.raw-toggle > summary:hover { color: var(--accent); }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.dirty-dot { color: var(--warn); font-size: 9px; margin-left: 4px; vertical-align: 2px; }
+
+.facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; margin: 4px 0 10px; }
+.fact {
+  background: var(--panel-2); border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm); padding: 9px 11px; min-width: 0;
+}
+.fact .label {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--fg-mute); margin-bottom: 3px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.fact .value { font-size: 13.5px; line-height: 1.45; color: var(--fg); word-break: break-word; }
+.fact .value.mono { font-family: var(--mono); font-size: 12.5px; }
+
 .pending-box { display: inline-flex; gap: 6px; align-items: center; }
 .pending-change {
   border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
