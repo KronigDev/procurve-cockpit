@@ -1,0 +1,619 @@
+"""Parsers for ProCurve ``show`` output.
+
+ProVision firmware formats almost every table the same way: an optional
+preamble of ``Key : Value`` lines, one or more header lines, a line of dashes
+that defines the column boundaries, then the rows.  Rather than hard-coding
+column offsets per command -- which drifts between K/W/WB firmware trains -- we
+derive the columns from the dash line itself.  That makes the parsers survive
+firmware differences, and anything genuinely unparseable still reaches the UI as
+raw text.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any, Iterable
+
+DASH_LINE_RE = re.compile(r"^[\s\-+|]*$")
+KV_RE = re.compile(r"(?P<k>[A-Za-z][A-Za-z0-9 _/%()#.\-]*?)\s*:\s*(?P<v>.*?)\s*(?=$)")
+
+
+# --------------------------------------------------------------------------
+# generic building blocks
+# --------------------------------------------------------------------------
+
+
+def _is_dash_line(line: str) -> bool:
+    return bool(line.strip()) and DASH_LINE_RE.match(line) is not None and line.count("-") >= 5
+
+
+def _column_spans(dash_line: str) -> list[tuple[int, int]]:
+    """Column boundaries derived from the runs of ``-`` in the separator line.
+
+    Each span is widened to the start of the following one so values that
+    overflow their column (long port names, big counters) are not truncated.
+    """
+    runs = [(m.start(), m.end()) for m in re.finditer(r"-+", dash_line)]
+    spans: list[tuple[int, int]] = []
+    for idx, (start, _end) in enumerate(runs):
+        next_start = runs[idx + 1][0] if idx + 1 < len(runs) else 10**6
+        spans.append((0 if idx == 0 else start, next_start))
+    return spans
+
+
+def _slice(line: str, span: tuple[int, int]) -> str:
+    return line[span[0] : span[1]].strip().strip("|+").strip()
+
+
+def _headers(lines: list[str], dash_idx: int, spans: list[tuple[int, int]]) -> list[str]:
+    """Join up to three stacked header lines per column."""
+    header_lines: list[str] = []
+    for i in range(dash_idx - 1, max(-1, dash_idx - 4), -1):
+        line = lines[i]
+        if not line.strip() or _is_dash_line(line):
+            break
+        header_lines.insert(0, line)
+    names: list[str] = []
+    seen: dict[str, int] = {}
+    for col, span in enumerate(spans):
+        parts = [_slice(line, span) for line in header_lines]
+        name = " ".join(p for p in parts if p).strip() or f"col{col + 1}"
+        # `show trunks` has two columns called "Type"; keep both reachable
+        # instead of letting the second silently overwrite the first.
+        if name in seen:
+            seen[name] += 1
+            name = f"{name} {seen[name]}"
+        else:
+            seen[name] = 1
+        names.append(name)
+    return names
+
+
+def parse_table(text: str, start: int = 0) -> tuple[list[dict[str, str]], list[str], int]:
+    """Parse the first dash-delimited table found at or after line *start*.
+
+    Returns ``(rows, headers, next_line_index)``; ``rows`` is empty when no
+    table is present.
+    """
+    lines = text.split("\n")
+    dash_idx = -1
+    for i in range(start, len(lines)):
+        if _is_dash_line(lines[i]):
+            dash_idx = i
+            break
+    if dash_idx == -1:
+        return [], [], len(lines)
+
+    spans = _column_spans(lines[dash_idx])
+    headers = _headers(lines, dash_idx, spans)
+    rows: list[dict[str, str]] = []
+    i = dash_idx + 1
+    while i < len(lines):
+        line = lines[i]
+        if not line.strip():
+            # A single blank line inside a table is rare but legal; stop on it
+            # unless the next line still looks like data for these columns.
+            nxt = lines[i + 1] if i + 1 < len(lines) else ""
+            if not nxt.strip() or _is_dash_line(nxt) or not nxt.startswith(" "):
+                break
+            i += 1
+            continue
+        if _is_dash_line(line):
+            break
+        values = [_slice(line, span) for span in spans]
+        if not any(values):
+            break
+        rows.append(dict(zip(headers, values)))
+        i += 1
+    return rows, headers, i
+
+
+def parse_all_tables(text: str) -> list[list[dict[str, str]]]:
+    """Every dash-delimited table in *text*, in order."""
+    tables: list[list[dict[str, str]]] = []
+    idx = 0
+    lines_total = len(text.split("\n"))
+    while idx < lines_total:
+        rows, _headers_, idx = parse_table(text, idx)
+        if not rows:
+            break
+        tables.append(rows)
+    return tables
+
+
+def parse_kv(text: str) -> dict[str, str]:
+    """Collect ``Key : Value`` pairs, including several pairs on one line.
+
+    ProCurve's ``show system-information`` puts two columns of pairs on a single
+    line, so we split on runs of two-plus spaces before matching.
+    """
+    result: dict[str, str] = {}
+    for raw in text.split("\n"):
+        line = raw.rstrip()
+        if ":" not in line:
+            continue
+        if _is_dash_line(line):
+            continue
+        # Split into chunks that each hold at most one "key : value" pair.
+        chunks = _split_kv_chunks(line)
+        for chunk in chunks:
+            m = KV_RE.match(chunk.strip())
+            if not m:
+                continue
+            key = re.sub(r"\s+", " ", m.group("k")).strip()
+            value = m.group("v").strip()
+            if key and key not in result:
+                result[key] = value
+    return result
+
+
+def _split_kv_chunks(line: str) -> list[str]:
+    """Cut *line* before every ``<gap><key> :`` that starts a new pair."""
+    cuts = [0]
+    for m in re.finditer(r"\s{2,}(?=[A-Za-z][A-Za-z0-9 _/%()#.\-]*?\s*:)", line):
+        if m.start() > 0:
+            cuts.append(m.end())
+    cuts.append(len(line))
+    return [line[cuts[i] : cuts[i + 1]] for i in range(len(cuts) - 1)]
+
+
+def _get(row: dict[str, str], *candidates: str, default: str = "") -> str:
+    """Fetch a value by fuzzy header name -- headers wobble between firmwares."""
+    lowered = {k.lower().replace(" ", ""): v for k, v in row.items()}
+    for cand in candidates:
+        key = cand.lower().replace(" ", "")
+        if key in lowered:
+            return lowered[key]
+    for cand in candidates:
+        key = cand.lower().replace(" ", "")
+        for k, v in lowered.items():
+            if key in k:
+                return v
+    return default
+
+
+def _yes(value: str) -> bool:
+    return value.strip().lower() in ("yes", "y", "on", "enabled", "true", "up")
+
+
+# --------------------------------------------------------------------------
+# command specific parsers
+# --------------------------------------------------------------------------
+
+
+def parse_system_info(text: str) -> dict[str, Any]:
+    """``show system-information``.
+
+    Memory and CPU are pulled with dedicated patterns: the firmware prints them
+    in a two-column block where the labels are indented continuations
+    (``Memory   - Total``, then a bare ``Free`` on the next line), which is more
+    than the generic key/value split should have to guess at.
+    """
+    kv = parse_kv(text)
+    return {
+        "name": _pick(kv, "System Name"),
+        "contact": _pick(kv, "System Contact"),
+        "location": _pick(kv, "System Location"),
+        "software": _pick(kv, "Software revision", "Software Revision"),
+        "rom": _pick(kv, "ROM Version"),
+        "serial": _pick(kv, "Serial Number"),
+        "base_mac": _pick(kv, "Base MAC Addr", "MAC Address"),
+        "uptime": _pick(kv, "Up Time"),
+        "cpu": _pick(kv, "CPU Util (%)", "CPU Util"),
+        "mem_total": _memory(text, "Total"),
+        "mem_free": _memory(text, "Free"),
+        "mac_age": _pick(kv, "MAC Age Time (sec)", "MAC Age Time"),
+        "time_zone": _pick(kv, "Time Zone"),
+        "raw": kv,
+    }
+
+
+_MEM_BLOCK_RE = re.compile(
+    r"Memory\s*-?\s*Total\s*:\s*(?P<total>[\d,]+)(?P<rest>(?:.|\n)*?)(?:\n\s*\n|\Z)",
+    re.I,
+)
+
+
+def _memory(text: str, which: str) -> str:
+    """Pull the switch's memory figures out of the two-column status block."""
+    block = _MEM_BLOCK_RE.search(text)
+    if not block:
+        return ""
+    if which.lower() == "total":
+        return block.group("total")
+    free = re.search(r"\bFree\s*:\s*([\d,]+)", block.group("rest"), re.I)
+    return free.group(1) if free else ""
+
+
+def _pick(kv: dict[str, str], *names: str) -> str:
+    for name in names:
+        if name in kv:
+            return kv[name]
+    lowered = {k.lower(): v for k, v in kv.items()}
+    for name in names:
+        if name.lower() in lowered:
+            return lowered[name.lower()]
+    # Last resort: the firmware sometimes prefixes a label ("Memory - Total").
+    for name in names:
+        needle = name.lower()
+        for key, value in lowered.items():
+            if needle in key:
+                return value
+    return ""
+
+
+def parse_ports(text: str) -> list[dict[str, Any]]:
+    """``show interfaces brief`` -> one dict per physical port."""
+    rows, _h, _i = parse_table(text)
+    ports: list[dict[str, Any]] = []
+    for row in rows:
+        port = _get(row, "Port")
+        if not port or port.lower().startswith("port"):
+            continue
+        ports.append(
+            {
+                "port": port,
+                "type": _get(row, "Type"),
+                "enabled": _yes(_get(row, "Enabled")),
+                "status": _get(row, "Status") or "Down",
+                "up": _get(row, "Status").strip().lower() == "up",
+                "mode": _get(row, "Mode"),
+                "mdi": _get(row, "MDI Mode", "MDI"),
+                "flow_control": _get(row, "Flow Ctrl", "Flow Control"),
+                "bcast_limit": _get(row, "Bcast Limit", "Bcast"),
+                "intrusion": _get(row, "Intrusion Alert", "Intrusion"),
+            }
+        )
+    return ports
+
+
+def parse_port_names(text: str) -> dict[str, str]:
+    """``show name`` -> friendly name per port."""
+    names: dict[str, str] = {}
+    for table in parse_all_tables(text):
+        for row in table:
+            port = _get(row, "Port")
+            if port:
+                names[port] = _get(row, "Name")
+    # Older firmware prints "Port : 1  Name : uplink" blocks instead of a table.
+    if not names:
+        for block in re.split(r"\n\s*\n", text):
+            kv = parse_kv(block)
+            if "Port" in kv:
+                names[kv["Port"]] = kv.get("Name", "")
+    return names
+
+
+def parse_vlans(text: str) -> list[dict[str, Any]]:
+    """``show vlans``."""
+    kv = parse_kv(text)
+    rows, _h, _i = parse_table(text)
+    vlans: list[dict[str, Any]] = []
+    for row in rows:
+        vid = _get(row, "VLAN ID", "VLAN")
+        if not vid.isdigit():
+            continue
+        vlans.append(
+            {
+                "id": int(vid),
+                "name": _get(row, "Name"),
+                "status": _get(row, "Status"),
+                "voice": _yes(_get(row, "Voice")),
+                "jumbo": _yes(_get(row, "Jumbo")),
+                "management": _get(row, "Management", default=""),
+            }
+        )
+    primary = kv.get("Primary VLAN", "")
+    mgmt = kv.get("Management VLAN", "")
+    for vlan in vlans:
+        vlan["primary"] = vlan["name"] == primary or str(vlan["id"]) == primary
+        vlan["is_mgmt"] = bool(mgmt) and (vlan["name"] == mgmt or str(vlan["id"]) == mgmt)
+    return vlans
+
+
+def parse_vlan_ports(text: str) -> list[dict[str, str]]:
+    """``show vlan <id>`` -> port membership rows."""
+    rows, _h, _i = parse_table(text)
+    out: list[dict[str, str]] = []
+    for row in rows:
+        port = _get(row, "Port Information", "Port")
+        if not port:
+            continue
+        out.append(
+            {
+                "port": port,
+                "mode": _get(row, "Mode").lower(),
+                "unknown_vlan": _get(row, "Unknown VLAN"),
+                "status": _get(row, "Status"),
+            }
+        )
+    return out
+
+
+def parse_trunks(text: str) -> list[dict[str, str]]:
+    """``show trunks``."""
+    rows, _h, _i = parse_table(text)
+    out: list[dict[str, str]] = []
+    for row in rows:
+        port = _get(row, "Port")
+        group = _get(row, "Group Name", "Group")
+        if not port or not group:
+            continue
+        out.append(
+            {
+                "port": port,
+                "name": _get(row, "Name"),
+                "group": group,
+                # The row carries the port's media type *and* the trunk type
+                # under headers that both read "Type"; the deduplicated second
+                # one is the trunk protocol (LACP / Trk).
+                "type": _get(row, "Group Type", "Type 2", "Type"),
+            }
+        )
+    return out
+
+
+def parse_lacp(text: str) -> list[dict[str, str]]:
+    """``show lacp``."""
+    rows, _h, _i = parse_table(text)
+    return [
+        {
+            "port": _get(row, "Port", "PORT", "Numb"),
+            "enabled": _get(row, "LACP Enabled", "Enabled"),
+            "trunk": _get(row, "Trunk Group", "Trunk"),
+            "status": _get(row, "Port Status", "Status"),
+            "partner": _get(row, "LACP Partner", "Partner"),
+            "key": _get(row, "Admin Key", "Key"),
+        }
+        for row in rows
+        if _get(row, "Port", "PORT", "Numb")
+    ]
+
+
+def parse_lldp_neighbors(text: str) -> list[dict[str, str]]:
+    """``show lldp info remote-device``."""
+    rows, _h, _i = parse_table(text)
+    out: list[dict[str, str]] = []
+    for row in rows:
+        port = _get(row, "LocalPort", "Local Port", "Port")
+        if not port:
+            continue
+        out.append(
+            {
+                "port": port,
+                "chassis_id": _get(row, "ChassisId", "Chassis Id"),
+                "port_id": _get(row, "PortId", "Port Id"),
+                "port_descr": _get(row, "PortDescr", "Port Descr"),
+                "system_name": _get(row, "SysName", "System Name"),
+            }
+        )
+    return out
+
+
+def parse_mac_table(text: str) -> list[dict[str, str]]:
+    """``show mac-address``."""
+    out: list[dict[str, str]] = []
+    for table in parse_all_tables(text):
+        for row in table:
+            mac = _get(row, "MAC Address", "MAC")
+            if not mac or "-" not in mac:
+                continue
+            out.append(
+                {
+                    "mac": mac,
+                    "port": _get(row, "Located on Port", "Port"),
+                    "vlan": _get(row, "VLAN"),
+                }
+            )
+    return out
+
+
+def parse_arp(text: str) -> list[dict[str, str]]:
+    """``show arp``."""
+    rows, _h, _i = parse_table(text)
+    return [
+        {
+            "ip": _get(row, "IP Address", "IP"),
+            "mac": _get(row, "MAC Address", "MAC"),
+            "type": _get(row, "Type"),
+            "port": _get(row, "Port"),
+        }
+        for row in rows
+        if _get(row, "IP Address", "IP")
+    ]
+
+
+def parse_poe(text: str) -> list[dict[str, Any]]:
+    """``show power-over-ethernet brief``."""
+    out: list[dict[str, Any]] = []
+    for table in parse_all_tables(text):
+        for row in table:
+            port = _get(row, "Port")
+            if not port or not re.match(r"^[A-Za-z]?\d", port):
+                continue
+            out.append(
+                {
+                    "port": port,
+                    "enabled": _yes(_get(row, "Power Enable", "Enable")),
+                    "priority": _get(row, "Priority", "Pri"),
+                    "alloc_by": _get(row, "Alloc By", "Allocated By"),
+                    "alloc": _get(row, "Alloc Power", "Allocated"),
+                    "actual": _get(row, "Actual Power", "Actual"),
+                    "status": _get(row, "Status", "Power Status"),
+                    "class": _get(row, "Class"),
+                }
+            )
+    return out
+
+
+def parse_stp(text: str) -> dict[str, Any]:
+    """``show spanning-tree``."""
+    kv = parse_kv(text)
+    rows, _h, _i = parse_table(text)
+    ports = [
+        {
+            "port": _get(row, "Port"),
+            "type": _get(row, "Type"),
+            "cost": _get(row, "Cost"),
+            "priority": _get(row, "Priority", "Prio"),
+            "state": _get(row, "State"),
+            "role": _get(row, "Role"),
+            "designated_bridge": _get(row, "Designated Bridge", "Desig Bridge"),
+        }
+        for row in rows
+        if _get(row, "Port")
+    ]
+    return {
+        "enabled": _yes(kv.get("STP Enabled", kv.get("Spanning Tree", "No"))),
+        "mode": kv.get("Mode", kv.get("Protocol Version", "")),
+        "priority": kv.get("Switch Priority", kv.get("Priority", "")),
+        "root_mac": kv.get("Root MAC Address", ""),
+        "root_path_cost": kv.get("Root Path Cost", ""),
+        "root_port": kv.get("Root Port", ""),
+        "ports": ports,
+        "info": kv,
+    }
+
+
+def parse_ip_config(text: str) -> list[dict[str, str]]:
+    """``show ip`` -> per-VLAN addressing."""
+    out: list[dict[str, str]] = []
+    for table in parse_all_tables(text):
+        for row in table:
+            vlan = _get(row, "VLAN")
+            if not vlan:
+                continue
+            out.append(
+                {
+                    "vlan": vlan,
+                    "config": _get(row, "IP Config", "Config"),
+                    "ip": _get(row, "IP Address", "IP"),
+                    "mask": _get(row, "Subnet Mask", "Mask"),
+                    "proxy_arp": _get(row, "Proxy ARP", default=""),
+                }
+            )
+    return out
+
+
+def parse_routes(text: str) -> list[dict[str, str]]:
+    """``show ip route``."""
+    rows, _h, _i = parse_table(text)
+    return [
+        {
+            "destination": _get(row, "Destination"),
+            "gateway": _get(row, "Gateway"),
+            "vlan": _get(row, "VLAN"),
+            "type": _get(row, "Type"),
+            "metric": _get(row, "Metric"),
+            "distance": _get(row, "Dist.", "Distance"),
+        }
+        for row in rows
+        if _get(row, "Destination")
+    ]
+
+
+def parse_flash(text: str) -> dict[str, str]:
+    """``show flash``."""
+    return parse_kv(text)
+
+
+def parse_modules(text: str) -> list[dict[str, str]]:
+    """``show modules``."""
+    out: list[dict[str, str]] = []
+    for table in parse_all_tables(text):
+        for row in table:
+            slot = _get(row, "Slot", "Module")
+            if not slot:
+                continue
+            out.append(
+                {
+                    "slot": slot,
+                    "description": _get(row, "Module Description", "Description"),
+                    "serial": _get(row, "Serial Number", "Serial"),
+                    "status": _get(row, "Status"),
+                }
+            )
+    return out
+
+
+def parse_port_counters(text: str) -> dict[str, str]:
+    """``show interfaces <port>`` -- counters live in the KV preamble."""
+    return parse_kv(text)
+
+
+def parse_snmp_communities(text: str) -> list[dict[str, str]]:
+    """``show snmp-server``."""
+    out: list[dict[str, str]] = []
+    for table in parse_all_tables(text):
+        for row in table:
+            name = _get(row, "Community Name", "Community")
+            if not name:
+                continue
+            out.append(
+                {
+                    "name": name,
+                    "mib_view": _get(row, "MIB View"),
+                    "write_access": _get(row, "Write Access", "Write"),
+                }
+            )
+    return out
+
+
+def parse_config_text(text: str) -> list[str]:
+    """Normalise ``show running-config`` into clean lines.
+
+    Strips the ``Running configuration:`` banner and any stray prompt echo so
+    the result can be diffed against the startup config.
+    """
+    lines = []
+    started = False
+    for raw in text.split("\n"):
+        line = raw.rstrip()
+        if not started:
+            if line.strip().lower().startswith(("running configuration", "startup configuration")):
+                started = True
+                continue
+            if line.strip().startswith(";"):  # version banner, e.g. "; J9145A ..."
+                started = True
+            elif not line.strip():
+                continue
+            else:
+                started = True
+        if PROMPT_ECHO_RE.match(line):
+            continue
+        lines.append(line)
+    # The banner line is followed by a blank one; trim padding at both ends so
+    # two dumps of the same config compare equal.
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return lines
+
+
+PROMPT_ECHO_RE = re.compile(r"^[A-Za-z0-9][\w.\-]*(\([^)]*\))?[#>]\s*$")
+
+
+def diff_config(running: Iterable[str], startup: Iterable[str]) -> list[dict[str, str]]:
+    """A line-oriented diff between running and startup config.
+
+    Uses difflib so moved blocks show up as a move rather than a full rewrite.
+    """
+    import difflib
+
+    a = [ln.rstrip() for ln in startup]
+    b = [ln.rstrip() for ln in running]
+    out: list[dict[str, str]] = []
+    for line in difflib.unified_diff(a, b, "startup-config", "running-config", lineterm="", n=3):
+        if line.startswith("+++") or line.startswith("---"):
+            kind = "meta"
+        elif line.startswith("@@"):
+            kind = "hunk"
+        elif line.startswith("+"):
+            kind = "add"
+        elif line.startswith("-"):
+            kind = "del"
+        else:
+            kind = "ctx"
+        out.append({"kind": kind, "text": line})
+    return out

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ProCurve Cockpit</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230b0e13'/><g fill='%2322d3ee'><rect x='5' y='11' width='4' height='4' rx='1'/><rect x='11' y='11' width='4' height='4' rx='1'/><rect x='17' y='11' width='4' height='4' rx='1'/><rect x='23' y='11' width='4' height='4' rx='1'/><rect x='5' y='17' width='4' height='4' rx='1'/><rect x='11' y='17' width='4' height='4' rx='1'/><rect x='17' y='17' width='4' height='4' rx='1'/><rect x='23' y='17' width='4' height='4' rx='1'/></g></svg>">
+</head>
+<body>
+
+<!-- ── connect screen ─────────────────────────────────────────────────── -->
+<div id="login" class="login">
+  <form class="login-card" id="login-form" autocomplete="off">
+    <div class="login-brand">
+      <svg viewBox="0 0 32 32" width="34" height="34" aria-hidden="true">
+        <g fill="currentColor">
+          <rect x="3" y="11" width="5" height="5" rx="1"/><rect x="10" y="11" width="5" height="5" rx="1"/>
+          <rect x="17" y="11" width="5" height="5" rx="1"/><rect x="24" y="11" width="5" height="5" rx="1"/>
+          <rect x="3" y="18" width="5" height="5" rx="1"/><rect x="10" y="18" width="5" height="5" rx="1"/>
+          <rect x="17" y="18" width="5" height="5" rx="1"/><rect x="24" y="18" width="5" height="5" rx="1"/>
+        </g>
+      </svg>
+      <div>
+        <h1>ProCurve Cockpit</h1>
+        <p>HP / Aruba ProVision — 2910al, 2810, 2510, 3500yl &amp; Verwandte</p>
+      </div>
+    </div>
+
+    <label class="field">
+      <span>Switch (IP oder Hostname)</span>
+      <input name="host" required placeholder="192.168.1.10" autocomplete="off" spellcheck="false">
+    </label>
+
+    <div class="field-row">
+      <label class="field">
+        <span>Benutzername</span>
+        <input name="username" value="manager" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="field">
+        <span>Passwort</span>
+        <input name="password" type="password" autocomplete="new-password">
+      </label>
+    </div>
+
+    <details class="login-advanced">
+      <summary>Erweitert</summary>
+      <div class="field-row">
+        <label class="field">
+          <span>Transport</span>
+          <select name="transport">
+            <option value="ssh">SSH</option>
+            <option value="telnet">Telnet (unverschlüsselt)</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Port</span>
+          <input name="port" type="number" placeholder="22" min="1" max="65535">
+        </label>
+      </div>
+      <label class="field">
+        <span>Enable-/Manager-Passwort <em>(nur falls abweichend)</em></span>
+        <input name="enable_password" type="password" autocomplete="new-password">
+      </label>
+      <label class="check">
+        <input type="checkbox" name="legacy" checked>
+        <span>Legacy-Krypto erlauben <em>(nötig für 2910al: dh-group14-sha1, ssh-rsa, aes-cbc)</em></span>
+      </label>
+    </details>
+
+    <button type="submit" class="btn btn-primary btn-lg" id="login-btn">Verbinden</button>
+    <div class="login-error" id="login-error" hidden></div>
+    <p class="login-hint">
+      Die Zugangsdaten bleiben im Arbeitsspeicher dieses lokalen Servers und werden nirgends gespeichert.
+    </p>
+  </form>
+</div>
+
+<!-- ── main app ───────────────────────────────────────────────────────── -->
+<div id="app" class="app" hidden>
+
+  <header class="topbar">
+    <div class="topbar-id">
+      <span class="dot" id="conn-dot"></span>
+      <div>
+        <strong id="sw-name">—</strong>
+        <span class="muted" id="sw-sub">—</span>
+      </div>
+    </div>
+    <div class="topbar-stats" id="topbar-stats"></div>
+    <div class="topbar-actions">
+      <span class="badge badge-warn" id="unsaved-badge" hidden title="Running-Config weicht von Startup-Config ab">
+        ungespeichert
+      </span>
+      <button class="btn btn-ghost" id="btn-refresh" title="Aktuelle Ansicht neu laden (R)">Neu laden</button>
+      <button class="btn btn-save" id="btn-save" title="write memory">Speichern</button>
+      <button class="btn btn-ghost" id="btn-disconnect">Trennen</button>
+    </div>
+  </header>
+
+  <div class="body">
+    <nav class="sidenav" id="sidenav"></nav>
+    <main class="main" id="main"></main>
+  </div>
+
+  <div class="statusbar">
+    <span id="status-prompt" class="mono">—</span>
+    <span id="status-msg"></span>
+    <span class="spacer"></span>
+    <span id="status-model" class="muted"></span>
+  </div>
+</div>
+
+<!-- ── change plan modal ──────────────────────────────────────────────── -->
+<div class="modal-backdrop" id="modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <header>
+      <h2 id="modal-title">Änderung prüfen</h2>
+      <button class="icon-btn" id="modal-close" aria-label="Schließen">✕</button>
+    </header>
+    <div class="modal-body" id="modal-body"></div>
+    <footer class="modal-foot" id="modal-foot"></footer>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

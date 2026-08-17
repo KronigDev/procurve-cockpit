@@ -1,0 +1,9 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+
+# Pinned below 4.0 on purpose. Paramiko 4 removed the SHA-1 key exchanges and
+# the ssh-rsa host key type, which is *all* the 2910al's SSH server offers --
+# with paramiko 5 installed the handshake fails before authentication.
+# See backend/transport.py::assert_legacy_support.
+paramiko>=3.4,<4
