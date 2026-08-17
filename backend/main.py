@@ -218,6 +218,8 @@ SECTIONS = {
     "qos": lambda d: d.qos(),
     "acls": lambda d: d.acls(),
     "logging": lambda d: d.logging(),
+    "protocols": lambda d: d.protocols(),
+    "extras": lambda d: d.extras(),
     "firmware": lambda d: d.firmware(),
     "config": lambda d: d.config(),
 }

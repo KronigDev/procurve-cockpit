@@ -652,6 +652,201 @@ def build_qos(p: dict) -> Plan:
 
 
 # --------------------------------------------------------------------------
+# protocol / feature toggles and the long tail of switch features
+# --------------------------------------------------------------------------
+
+
+def _mac_addr(value: Any) -> str:
+    """Normalise any MAC notation into ProCurve's ``aabbcc-ddeeff``."""
+    digits = re.sub(r"[^0-9a-fA-F]", "", str(value or ""))
+    if len(digits) != 12:
+        raise PlanError(f"Not a MAC address: {value!r}")
+    digits = digits.lower()
+    return f"{digits[:6]}-{digits[6:]}"
+
+
+#: feature -> (enable command, disable command, warning or None)
+_PROTOCOL_TOGGLES: dict[str, tuple[str, str, str | None]] = {
+    "gvrp": ("gvrp", "no gvrp", "GVRP dynamically creates VLANs learned from neighbours."),
+    "cdp": ("cdp run", "no cdp run", None),
+    "dhcp-relay": ("dhcp-relay", "no dhcp-relay", None),
+    "fastboot": ("fastboot", "no fastboot",
+                 "Fastboot skips the power-on self test on the next boot."),
+    "autorun": ("autorun", "no autorun",
+                "Autorun executes scripts from inserted USB media automatically."),
+    "tcp-push-preserve": ("tcp-push-preserve", "no tcp-push-preserve", None),
+    "encrypt-credentials": ("encrypt-credentials", "no encrypt-credentials",
+                            "Changes how credentials are stored in the config file."),
+    "include-credentials": ("include-credentials", "no include-credentials",
+                            "Passwords and keys become part of the saved config file."),
+}
+
+
+def build_protocol_toggle(p: dict) -> Plan:
+    feature = p.get("feature")
+    if feature not in _PROTOCOL_TOGGLES:
+        raise PlanError(f"Unknown feature toggle: {feature!r}")
+    if p.get("enabled") is None:
+        raise PlanError("Nothing to change.")
+    on, off, warning = _PROTOCOL_TOGGLES[feature]
+    plan = Plan(title=f"{'Enable' if p['enabled'] else 'Disable'} {feature}")
+    plan.commands = [on if p["enabled"] else off]
+    if warning and p["enabled"]:
+        plan.risks.append(Risk("warn", warning, plan.commands[0]))
+    return plan
+
+
+def build_igmp(p: dict) -> Plan:
+    vid = vlan_id(p.get("vlan"))
+    plan = Plan(title=f"IGMP on VLAN {vid}")
+    cmds = [f"vlan {vid}"]
+    if p.get("enabled") is not None:
+        cmds.append("ip igmp" if p["enabled"] else "no ip igmp")
+    if p.get("querier") is not None:
+        cmds.append("ip igmp querier" if p["querier"] else "no ip igmp querier")
+    if len(cmds) == 1:
+        raise PlanError("Nothing to change.")
+    cmds.append("exit")
+    plan.commands = cmds
+    return plan
+
+
+def build_loop_protect(p: dict) -> Plan:
+    plan = Plan(title="Loop protection")
+    cmds: list[str] = []
+    if p.get("ports"):
+        sel = port_list(p["ports"])
+        if p.get("enabled") is None:
+            raise PlanError("Say whether loop protection goes on or off for those ports.")
+        cmds.append(f"loop-protect {sel}" if p["enabled"] else f"no loop-protect {sel}")
+    if p.get("transmit_interval") is not None:
+        interval = int(p["transmit_interval"])
+        if not 1 <= interval <= 10:
+            raise PlanError("Loop-protect transmit interval is 1-10 seconds.")
+        cmds.append(f"loop-protect transmit-interval {interval}")
+    if p.get("disable_timer") is not None:
+        timer = int(p["disable_timer"])
+        if not 0 <= timer <= 604800:
+            raise PlanError("Loop-protect disable timer is 0-604800 seconds.")
+        cmds.append(f"loop-protect disable-timer {timer}")
+    if not cmds:
+        raise PlanError("Nothing to change.")
+    plan.commands = cmds
+    return plan
+
+
+def build_link_keepalive(p: dict) -> Plan:
+    sel = _ports_of(p)
+    if p.get("enabled") is None:
+        raise PlanError("Say whether link-keepalive goes on or off.")
+    plan = Plan(title=f"Link-keepalive (UDLD) on {sel}")
+    plan.commands = [
+        f"link-keepalive {sel}" if p["enabled"] else f"no link-keepalive {sel}"
+    ]
+    return plan
+
+
+def build_sflow(p: dict) -> Plan:
+    instance = int(p.get("instance") or 1)
+    if not 1 <= instance <= 3:
+        raise PlanError("sFlow instance is 1-3.")
+    plan = Plan(title=f"sFlow instance {instance}")
+    cmds: list[str] = []
+    if p.get("remove"):
+        cmds.append(f"no sflow {instance} destination")
+    else:
+        if p.get("destination"):
+            dest = str(p["destination"]).strip()
+            if not re.fullmatch(r"[\w.\-:]+", dest, re.ASCII):
+                raise PlanError("sFlow destination must be an address without spaces.")
+            line = f"sflow {instance} destination {dest}"
+            if p.get("udp_port") is not None:
+                line += f" {int(p['udp_port'])}"
+            cmds.append(line)
+        if p.get("sampling_ports") and p.get("sampling_rate") is not None:
+            cmds.append(
+                f"sflow {instance} sampling {port_list(p['sampling_ports'])} "
+                f"{int(p['sampling_rate'])}"
+            )
+        if p.get("polling_ports") and p.get("polling_interval") is not None:
+            cmds.append(
+                f"sflow {instance} polling {port_list(p['polling_ports'])} "
+                f"{int(p['polling_interval'])}"
+            )
+    if not cmds:
+        raise PlanError("Nothing to change.")
+    plan.commands = cmds
+    return plan
+
+
+def build_dhcp_relay_option82(p: dict) -> Plan:
+    mode = p.get("mode")
+    if mode == "disable":
+        plan = Plan(title="Disable DHCP relay option 82")
+        plan.commands = ["no dhcp-relay option 82"]
+        return plan
+    if mode not in ("append", "replace", "drop", "keep"):
+        raise PlanError("Option 82 mode must be append, replace, drop, keep or disable.")
+    plan = Plan(title=f"DHCP relay option 82: {mode}")
+    plan.commands = [f"dhcp-relay option 82 {mode}"]
+    return plan
+
+
+def build_mac_lockout(p: dict) -> Plan:
+    mac = _mac_addr(p.get("mac"))
+    if p.get("remove"):
+        plan = Plan(title=f"Unlock MAC {mac}")
+        plan.commands = [f"no lockout-mac {mac}"]
+    else:
+        plan = Plan(title=f"Lock out MAC {mac}")
+        plan.commands = [f"lockout-mac {mac}"]
+        plan.risks.append(
+            Risk("warn", f"{mac} is dropped on every port until the lockout is removed.")
+        )
+    return plan
+
+
+def build_mac_static(p: dict) -> Plan:
+    mac = _mac_addr(p.get("mac"))
+    vid = vlan_id(p.get("vlan"))
+    port = str(p.get("port") or "").strip()
+    if not re.fullmatch(r"[A-Za-z]?\d+", port, re.ASCII):
+        raise PlanError("Static MAC needs a single port (e.g. 7 or A1).")
+    if p.get("remove"):
+        plan = Plan(title=f"Remove static MAC {mac}")
+        plan.commands = [f"no static-mac {mac} vlan {vid}"]
+    else:
+        plan = Plan(title=f"Pin MAC {mac} to port {port}")
+        plan.commands = [f"static-mac {mac} vlan {vid} interface {port}"]
+        plan.notes.append("The MAC is only reachable through this port from now on.")
+    return plan
+
+
+_FAULT_FINDER_FAULTS = (
+    "all", "bad-driver", "bad-transceiver", "bad-cable", "too-long-cable",
+    "over-bandwidth", "broadcast-storm", "loss-of-link", "duplex-mismatch-hdx",
+    "duplex-mismatch-fdx", "link-flap",
+)
+
+
+def build_fault_finder(p: dict) -> Plan:
+    fault = p.get("fault")
+    if fault not in _FAULT_FINDER_FAULTS:
+        raise PlanError(f"Unknown fault-finder check: {fault!r}")
+    sensitivity = p.get("sensitivity")
+    if sensitivity not in ("low", "medium", "high"):
+        raise PlanError("Sensitivity must be low, medium or high.")
+    action = p.get("action")
+    if action not in ("warn", "warn-and-disable"):
+        raise PlanError("Action must be warn or warn-and-disable.")
+    plan = Plan(title=f"Fault finder: {fault}")
+    plan.commands = [f"fault-finder {fault} sensitivity {sensitivity} action {action}"]
+    if action == "warn-and-disable":
+        plan.risks.append(Risk("warn", "Matching ports are shut down automatically."))
+    return plan
+
+
+# --------------------------------------------------------------------------
 # firmware / boot management -- exec level, not config mode
 # --------------------------------------------------------------------------
 
@@ -815,6 +1010,15 @@ BUILDERS: dict[str, Callable[[dict], Plan]] = {
     "mirror.set": build_mirror,
     "routing.set": build_routing,
     "qos.set": build_qos,
+    "protocol.toggle": build_protocol_toggle,
+    "igmp.set": build_igmp,
+    "loop_protect.set": build_loop_protect,
+    "link_keepalive.set": build_link_keepalive,
+    "sflow.set": build_sflow,
+    "dhcp_relay.option82": build_dhcp_relay_option82,
+    "mac.lockout": build_mac_lockout,
+    "mac.static": build_mac_static,
+    "fault_finder.set": build_fault_finder,
     "firmware.boot": build_firmware_boot,
     "firmware.default_boot": build_firmware_default,
     "firmware.copy": build_firmware_copy,

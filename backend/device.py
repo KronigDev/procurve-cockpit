@@ -501,6 +501,59 @@ class ProCurveDevice:
             "config_files": self._structured("show config files", cache=30).as_dict(),
         }
 
+    def protocols(self) -> dict[str, Any]:
+        """L2/L3 protocol features beyond the core panels.
+
+        Command spellings vary per train; anything a train rejects arrives as
+        an errored fetch and the panel hides that card.
+        """
+        f = self._structured
+        return {
+            "gvrp": f("show gvrp", cache=30).as_dict(),
+            "igmp": self._first_answer(
+                ("show igmp", "show ip igmp"), parse_structured, cache=30
+            ).as_dict(),
+            "igmp_proxy": f("show igmp-proxy", cache=60).as_dict(),
+            "loop_protect": f("show loop-protect", cache=30).as_dict(),
+            "link_keepalive": f("show link-keepalive", cache=30).as_dict(),
+            "sflow": self._first_answer(
+                ("show sflow agent", "show sflow"), parse_structured, cache=60
+            ).as_dict(),
+            "dhcp_relay": f("show dhcp-relay", cache=30).as_dict(),
+            "dhcp_client": f("show dhcp", cache=60).as_dict(),
+            "cdp": f("show cdp", cache=60).as_dict(),
+            "jumbos": f("show jumbos", cache=60).as_dict(),
+            "timep": f("show timep", cache=60).as_dict(),
+            "stack": f("show stack", cache=120).as_dict(),
+        }
+
+    def extras(self) -> dict[str, Any]:
+        """The long tail: device management, MAC controls, AAA views."""
+        f = self._structured
+        return {
+            "fault_finder": f("show fault-finder", cache=60).as_dict(),
+            "filters": f("show filter", cache=30).as_dict(),
+            "front_panel": f("show front-panel-security", cache=120).as_dict(),
+            "lockout_mac": f("show lockout-mac", cache=15).as_dict(),
+            "static_mac": f("show static-mac", cache=15).as_dict(),
+            "management": f("show management", cache=60).as_dict(),
+            "sessions": f("show session-list", cache=10).as_dict(),
+            "console": f("show console", cache=120).as_dict(),
+            "snmpv3": self._first_answer(
+                ("show snmpv3 user", "show snmpv3"), parse_structured, cache=60
+            ).as_dict(),
+            "ipv6": f("show ipv6", cache=60).as_dict(),
+            "key_chain": f("show key-chain", cache=60).as_dict(),
+            "accounting": f("show accounting", cache=60).as_dict(),
+            "authorization": f("show authorization", cache=60).as_dict(),
+            "tcp_push": f("show tcp-push-preserve", cache=60).as_dict(),
+            "encrypt_credentials": f("show encrypt-credentials", cache=60).as_dict(),
+            "include_credentials": f("show include-credentials", cache=60).as_dict(),
+            "banner": f("show banner", cache=60).as_dict(),
+            "autorun": f("show autorun", cache=60).as_dict(),
+            "control_plane": f("show control-plane-protection", cache=120).as_dict(),
+        }
+
     def logging(self) -> dict[str, Any]:
         return {
             "log": self._parsed(

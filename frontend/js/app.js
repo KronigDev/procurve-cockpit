@@ -11,8 +11,10 @@ import {
 
 import dashboard from './panels/dashboard.js';
 import events from './panels/events.js';
+import extras from './panels/extras.js';
 import firmware from './panels/firmware.js';
 import ports from './panels/ports.js';
+import protocols from './panels/protocols.js';
 import vlans from './panels/vlans.js';
 import switching from './panels/switching.js';
 import network from './panels/network.js';
@@ -29,9 +31,11 @@ const PANELS = [
   vlans,
   ...switching,
   poe,
+  protocols,
   ...network,
   ...security,
   ...systemPanels,
+  extras,
   firmware,
   config,
   consolePanel,
