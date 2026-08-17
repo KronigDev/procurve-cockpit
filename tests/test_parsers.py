@@ -37,6 +37,36 @@ INTERFACES_BRIEF = """
   A1           SFP+SR     | No        Yes     Up     10GigFD    NA    off   0
 """
 
+INTERFACES_CONFIG = """
+ Port Settings
+
+  Port  Type      | Enabled Mode         Flow Ctrl MDI
+  ----- --------- + ------- ------------ --------- ----
+  1     100/1000T | Yes     Auto          Disable   Auto
+  2     100/1000T | Yes     Auto-10       Disable   MDIX
+  3     100/1000T | No      1000FDx       Enable    MDI
+  21    100/1000T | Yes     100FDx        Disable   Auto
+"""
+
+LLDP_CONFIG = """
+ LLDP Port Configuration
+
+  Port  | AdminStatus  NotificationEnabled  Med Topology Trap Enabled
+  ----- + ------------ -------------------- --------------------------
+  1     | Tx_Rx        False                False
+  2     | TxOnly       False                False
+  3     | Disable      False                False
+"""
+
+STP_CONFIG = """
+ Spanning Tree Port Configuration
+
+  Port  Type      | Cost      Priority Admin Edge Port  BPDU Protection
+  ----- --------- + --------- -------- ---------------- ---------------
+  1     100/1000T | Auto      128      Yes              No
+  2     100/1000T | 20000     128      No               Yes
+"""
+
 VLANS = """
  Status and Counters - VLAN Information
 
@@ -181,6 +211,40 @@ def check(name):
         CHECKS.append((name, fn))
         return fn
     return wrap
+
+
+@check("show interfaces config")
+def _t_port_config():
+    cfg = P.parse_port_config(INTERFACES_CONFIG)
+    assert set(cfg) == {"1", "2", "3", "21"}, cfg
+    assert cfg["1"] == {
+        "enabled": "Yes", "mode": "Auto", "flow_ctrl": "Disable", "mdi": "Auto",
+    }, cfg["1"]
+    # The configured mode differs from the negotiated one in `show interfaces
+    # brief` -- that difference is the whole reason this command is fetched.
+    assert cfg["2"]["mode"] == "Auto-10"
+    assert cfg["3"]["flow_ctrl"] == "Enable"
+    assert cfg["21"]["mdi"] == "Auto"
+
+
+@check("show lldp config")
+def _t_lldp_config():
+    admin = P.parse_lldp_config(LLDP_CONFIG)
+    assert admin == {"1": "tx_rx", "2": "tx_only", "3": "disable"}, admin
+
+
+@check("show spanning-tree config")
+def _t_stp_port_config():
+    stp = P.parse_stp_port_config(STP_CONFIG)
+    assert stp["1"]["admin_edge"] is True
+    assert stp["1"]["bpdu_protection"] is False
+    assert stp["1"]["path_cost"] == "Auto"
+    assert stp["2"]["admin_edge"] is False
+    assert stp["2"]["bpdu_protection"] is True
+    assert stp["2"]["path_cost"] == "20000"
+    # Root guard has no column on this firmware; absence must read as "off",
+    # not blow up.
+    assert stp["1"]["root_guard"] is False
 
 
 @check("show interfaces brief")

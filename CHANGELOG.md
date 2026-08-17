@@ -5,6 +5,34 @@ Alle nennenswerten Änderungen an ProCurve Cockpit stehen hier.
 Das Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/),
 die Versionierung an [Semantic Versioning](https://semver.org/lang/de/).
 
+## [Unveröffentlicht]
+
+### Behoben
+
+- Das Änderungs-Modal war dauerhaft sichtbar und ließ sich nicht wegklicken.
+  Dem Stylesheet fehlte eine `[hidden]`-Regel: jede Autoren-Regel mit `display`
+  schlägt das `[hidden] { display: none }` des Browsers, `.modal-backdrop`
+  hatte also gewonnen. Betraf auch `#app` und die Badges.
+
+### Geändert
+
+- Die Port-Auswahl zeigt jetzt den **aktuellen** Zustand statt „unverändert“.
+  Dafür wird zusätzlich `show interfaces config` gelesen — `show interfaces
+  brief` liefert nur den ausgehandelten Zustand (`1000FDx`, `MDIX`), nicht den
+  konfigurierten (`Auto`, `Auto-MDIX`). Neu ebenfalls gelesen: `show lldp
+  config` und `show spanning-tree config`.
+- Jedes Feld merkt sich seinen Ausgangswert und wird nur gesendet, wenn es
+  davon abweicht. Vorbelegen erzeugt damit keine Konfigurationszeile.
+- Bei Mehrfachauswahl mit unterschiedlichen Werten steht „gemischt“ statt
+  eines willkürlich gewählten Werts.
+- Bei einem einzelnen Port steht oben im Inspektor eine Übersicht: Status,
+  Typ, VLANs, Trunk, LLDP-Nachbar.
+
+### Robustheit
+
+- `Up Time` und `CPU Util` werden zusätzlich per Textsuche gefunden, falls die
+  Firmware den zweispaltigen Statusblock anders umbricht als dokumentiert.
+
 ## [1.0.0] — 2026-08-17
 
 Erste Fassung. Vollständige Weboberfläche für HP/Aruba ProVision-Switches,

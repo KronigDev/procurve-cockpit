@@ -21,15 +21,18 @@ from .parsers import (
     parse_flash,
     parse_ip_config,
     parse_lacp,
+    parse_lldp_config,
     parse_lldp_neighbors,
     parse_mac_table,
     parse_modules,
     parse_poe,
+    parse_port_config,
     parse_port_names,
     parse_ports,
     parse_routes,
     parse_snmp_communities,
     parse_stp,
+    parse_stp_port_config,
     parse_system_info,
     parse_trunks,
     parse_vlan_ports,
@@ -191,9 +194,26 @@ class ProCurveDevice:
             "host": self.host,
         }
 
+    #: Configured port settings, LLDP mode and per-port STP only move when
+    #: somebody changes them, so they are cached far longer than link state --
+    #: they cost three extra round trips per uncached port view.
+    PORT_CONFIG_CACHE = 30.0
+
     def ports(self) -> dict[str, Any]:
         brief = self._parsed("show interfaces brief", parse_ports, cache=3)
         names = self._parsed("show name", parse_port_names, cache=10)
+        config = self._parsed(
+            "show interfaces config", parse_port_config, cache=self.PORT_CONFIG_CACHE
+        )
+        config_map = config.data or {}
+        stp_cfg = self._parsed(
+            "show spanning-tree config", parse_stp_port_config, cache=self.PORT_CONFIG_CACHE
+        )
+        stp_map = stp_cfg.data or {}
+        lldp_cfg = self._parsed(
+            "show lldp config", parse_lldp_config, cache=self.PORT_CONFIG_CACHE
+        )
+        lldp_admin_map = lldp_cfg.data or {}
         vlan_map = self.port_vlan_map()
         trunks = self._parsed("show trunks", parse_trunks, cache=10)
         trunk_map = {t["port"]: t for t in (trunks.data or [])}
@@ -216,15 +236,23 @@ class ProCurveDevice:
                     "trunk": trunk_map.get(pid),
                     "lldp": lldp_map.get(pid),
                     "poe": poe_map.get(pid),
+                    # What is *configured* -- the inspector preselects from this,
+                    # while the fields above describe what the link negotiated.
+                    "config": config_map.get(pid, {}),
+                    "lldp_admin": lldp_admin_map.get(pid, ""),
+                    "stp": stp_map.get(pid, {}),
                 }
             )
         return {
             "ports": merged,
             "sources": {
                 "brief": brief.as_dict(),
+                "config": config.as_dict(),
                 "names": names.as_dict(),
                 "trunks": trunks.as_dict(),
                 "lldp": lldp.as_dict(),
+                "lldp_config": lldp_cfg.as_dict(),
+                "stp_config": stp_cfg.as_dict(),
             },
         }
 

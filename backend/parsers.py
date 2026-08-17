@@ -198,14 +198,32 @@ def parse_system_info(text: str) -> dict[str, Any]:
         "rom": _pick(kv, "ROM Version"),
         "serial": _pick(kv, "Serial Number"),
         "base_mac": _pick(kv, "Base MAC Addr", "MAC Address"),
-        "uptime": _pick(kv, "Up Time"),
-        "cpu": _pick(kv, "CPU Util (%)", "CPU Util"),
+        # These three sit in the two-column half of the block, where a firmware
+        # that lays the columns out differently can defeat the key/value split.
+        # Fall back to scanning the raw text for the label itself.
+        "uptime": _pick(kv, "Up Time", "Uptime") or _scan_pair(text, r"Up\s*-?\s*Time"),
+        "cpu": (_pick(kv, "CPU Util (%)", "CPU Util")
+                or _scan_pair(text, r"CPU\s*Util[^:\n]*")),
         "mem_total": _memory(text, "Total"),
         "mem_free": _memory(text, "Free"),
         "mac_age": _pick(kv, "MAC Age Time (sec)", "MAC Age Time"),
         "time_zone": _pick(kv, "Time Zone"),
         "raw": kv,
     }
+
+
+def _scan_pair(text: str, label_pattern: str) -> str:
+    """Find ``<label> : <value>`` in raw text, stopping before the next column.
+
+    Used only as a fallback for the two-column status block: a value there ends
+    either at the end of the line or where the next ``Key :`` pair begins.
+    """
+    m = re.search(
+        rf"{label_pattern}\s*:\s*(?P<v>.*?)(?=\s{{2,}}[A-Za-z][\w /%()\-]*\s*:|$)",
+        text,
+        re.I | re.M,
+    )
+    return m.group("v").strip() if m else ""
 
 
 _MEM_BLOCK_RE = re.compile(
@@ -282,6 +300,80 @@ def parse_port_names(text: str) -> dict[str, str]:
             if "Port" in kv:
                 names[kv["Port"]] = kv.get("Name", "")
     return names
+
+
+def parse_port_config(text: str) -> dict[str, dict[str, str]]:
+    """``show interfaces config`` -> the *configured* settings per port.
+
+    ``show interfaces brief`` reports what the link negotiated (``1000FDx``,
+    ``MDIX``, ``off``).  The inspector has to preselect what is actually in the
+    running config (``Auto``, ``Auto-MDIX``, ``Disable``) -- otherwise picking
+    "the value that is already shown" would generate a real config change.
+    """
+    config: dict[str, dict[str, str]] = {}
+    for table in parse_all_tables(text):
+        for row in table:
+            port = _get(row, "Port")
+            if not port or port.lower().startswith("port"):
+                continue
+            config[port] = {
+                "enabled": _get(row, "Enabled"),
+                "mode": _get(row, "Mode"),
+                "flow_ctrl": _get(row, "Flow Ctrl", "Flow Control"),
+                "mdi": _get(row, "MDI Mode", "MDI"),
+            }
+    return config
+
+
+#: `show lldp config` spells the mode Tx_Rx / TxOnly / RxOnly depending on the
+#: firmware train; the UI and the CLI both want tx_rx / tx_only / rx_only.
+_LLDP_ADMIN = {
+    "tx_rx": "tx_rx",
+    "txrx": "tx_rx",
+    "tx_only": "tx_only",
+    "txonly": "tx_only",
+    "rx_only": "rx_only",
+    "rxonly": "rx_only",
+    "disable": "disable",
+    "disabled": "disable",
+}
+
+
+def parse_lldp_config(text: str) -> dict[str, str]:
+    """``show lldp config`` -> per-port admin status, normalised to CLI values."""
+    out: dict[str, str] = {}
+    for table in parse_all_tables(text):
+        for row in table:
+            port = _get(row, "Port")
+            status = _get(row, "AdminStatus", "Admin Status")
+            if not port or not status:
+                continue
+            key = status.strip().lower().replace("-", "_")
+            out[port] = _LLDP_ADMIN.get(key, status.strip())
+    return out
+
+
+def parse_stp_port_config(text: str) -> dict[str, dict[str, Any]]:
+    """``show spanning-tree config`` -> per-port STP settings.
+
+    The column set differs noticeably between the RSTP and MSTP builds, so
+    every lookup goes through the fuzzy header matcher and simply yields a
+    default when a column is absent on this firmware.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for table in parse_all_tables(text):
+        for row in table:
+            port = _get(row, "Port")
+            if not port or not re.match(r"^[A-Za-z]?\d", port):
+                continue
+            out[port] = {
+                "path_cost": _get(row, "Path Cost", "Cost"),
+                "priority": _get(row, "Priority", "Prio"),
+                "admin_edge": _yes(_get(row, "Admin Edge Port", "Edge Port", "Edge")),
+                "bpdu_protection": _yes(_get(row, "BPDU Protection", "BPDU Guard")),
+                "root_guard": _yes(_get(row, "Root Guard", "Root Grd")),
+            }
+    return out
 
 
 def parse_vlans(text: str) -> list[dict[str, Any]]:
